@@ -1,0 +1,58 @@
+name: Experiment 2 Hybrid Cost Regime
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  experiment-2:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'feature/experiment-hybrid-cost-regime-model'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Python syntax check
+        run: python -m compileall -q backend scripts tests
+      - name: Focused Experiment 2 tests
+        run: pytest -q tests/test_hybrid_cost_regime_experiment.py
+      - name: Full backend tests
+        run: pytest -q
+      - name: Frontend build
+        run: npm run build --prefix frontend
+      - name: Run Experiment 2 on official baseline cohort
+        run: python scripts/run_hybrid_cost_regime_experiment.py | tee experiment-2.log
+      - name: Print measured Experiment 2 metrics
+        run: |
+          echo '--- Experiment 2 result ---'
+          grep 'EXPERIMENT2_RESULT_JSON=' experiment-2.log
+          echo '--- Regime distribution ---'
+          cat reports/experiments/exp2_regime_distribution.json
+          echo '--- Classifier metrics ---'
+          cat reports/experiments/exp2_regime_classifier_metrics.json
+          echo '--- Final comparison ---'
+          cat reports/experiments/v3_hybrid_cost_regime.json
+      - name: Upload Experiment 2 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-2-results
+          if-no-files-found: error
+          path: |
+            experiment-2.log
+            reports/experiments/exp2_regime_distribution.json
+            reports/experiments/exp2_regime_classifier_metrics.json
+            reports/experiments/exp2_error_distribution.json
+            reports/experiments/exp2_extreme_case_analysis.json
+            reports/experiments/v3_hybrid_cost_regime.json
+            reports/experiments/model_evolution.json
+            models/experiments/hybrid_cost_regime/metadata.json
+            models/experiments/hybrid_cost_regime/prediction_validation.csv
