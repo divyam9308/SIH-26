@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Audit live PAIMANA archive coverage without modifying production datasets.
+"""Audit public PAIMANA archive and checked-in monthly/outcome join coverage.
 
-This script is intentionally read-only. It discovers every public flash report,
-probes one representative report per financial year with the current monthly
-parser, and reports how much of the checked-in monthly history can be linked to
-completed outcomes by project id or conservative normalized project name.
+The audit is read-only and intentionally does not download every historical PDF;
+that would make CI depend on dozens of large remote files. Historical PDF parsing
+is exercised separately by ingestion tests and the live ingestion experiment.
 """
 from __future__ import annotations
 
@@ -13,20 +12,13 @@ from pathlib import Path
 import json
 import re
 import sys
-import tempfile
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from backend.app.services.paimana_ingestion_service import (
-    _fetch,
-    _report_month,
-    discover_archive_reports,
-    extract_report_text,
-    parse_project_list,
-)
+from backend.app.services.paimana_ingestion_service import discover_archive_reports
 
 MONTHLY = ROOT / "data" / "processed" / "project_monthly_history.csv"
 OUTCOMES = ROOT / "data" / "processed" / "paimana_completed_outcomes.csv"
@@ -42,41 +34,11 @@ def main() -> None:
     by_year: dict[str, list[dict]] = defaultdict(list)
     for report in reports:
         by_year[report["financial_year"]].append(report)
-
-    print("ARCHIVE_REPORT_COUNT=" + str(len(reports)))
-    print("ARCHIVE_FINANCIAL_YEARS=" + json.dumps(sorted(by_year)))
-    print("ARCHIVE_REPORTS_PER_YEAR=" + json.dumps({k: len(v) for k, v in sorted(by_year.items())}, sort_keys=True))
-
-    probe_counts: dict[str, dict] = {}
-    for financial_year, candidates in sorted(by_year.items()):
-        dated = [(r, _report_month(r["financial_year"], r["label"])) for r in candidates]
-        dated = [(r, month) for r, month in dated if month is not None]
-        if not dated:
-            continue
-        # Prefer the latest dated report in the financial year; this maximizes
-        # the chance that the annual report contains the full ongoing-project table.
-        report, report_month = max(dated, key=lambda pair: pair[1])
-        try:
-            payload = _fetch(report["url"])
-            if not payload.startswith(b"%PDF"):
-                raise ValueError("response was not a PDF")
-            with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
-                handle.write(payload)
-                handle.flush()
-                text = extract_report_text(Path(handle.name))
-            parsed = parse_project_list(text, report_month, report["label"], report["url"])
-            probe_counts[financial_year] = {
-                "label": report["label"],
-                "month": report_month.strftime("%Y-%m-%d"),
-                "rows_with_current_parser": int(len(parsed)),
-            }
-        except Exception as exc:
-            probe_counts[financial_year] = {
-                "label": report["label"],
-                "month": report_month.strftime("%Y-%m-%d"),
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-    print("ARCHIVE_PARSER_PROBE=" + json.dumps(probe_counts, sort_keys=True))
+    labels_by_year = {year: sorted({item["label"] for item in rows}) for year, rows in sorted(by_year.items())}
+    print("ARCHIVE_REPORT_COUNT=" + str(len(reports)), flush=True)
+    print("ARCHIVE_FINANCIAL_YEARS=" + json.dumps(sorted(by_year)), flush=True)
+    print("ARCHIVE_REPORTS_PER_YEAR=" + json.dumps({k: len(v) for k, v in sorted(by_year.items())}, sort_keys=True), flush=True)
+    print("ARCHIVE_LABELS_PER_YEAR=" + json.dumps(labels_by_year, sort_keys=True), flush=True)
 
     monthly = pd.read_csv(MONTHLY, dtype={"project_id": str})
     outcomes = pd.read_csv(OUTCOMES, dtype={"project_id": str})
@@ -88,7 +50,7 @@ def main() -> None:
     outcome_names = Counter(_key(v) for v in outcomes.get("project_name", pd.Series(dtype=str)))
     unique_name_overlap = {
         name for name in monthly_names.keys() & outcome_names.keys()
-        if name and monthly_names[name] >= 1 and outcome_names[name] == 1
+        if name and outcome_names[name] == 1
     }
     matched_outcome_names = outcomes.get("project_name", pd.Series(dtype=str)).map(_key).isin(unique_name_overlap)
     matched_outcome_ids = outcomes.get("project_id", pd.Series(index=outcomes.index, dtype=str)).fillna("").astype(str).isin(id_overlap)
@@ -104,7 +66,7 @@ def main() -> None:
         "completed_rows_matched_by_id_or_unique_normalized_name": int((matched_outcome_ids | matched_outcome_names).sum()),
         "unique_normalized_name_overlap": int(len(unique_name_overlap)),
     }
-    print("CHECKED_IN_JOIN_COVERAGE=" + json.dumps(coverage, sort_keys=True))
+    print("CHECKED_IN_JOIN_COVERAGE=" + json.dumps(coverage, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
