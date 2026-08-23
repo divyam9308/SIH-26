@@ -12,9 +12,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 import json
 import re
+import sys
 import tempfile
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from backend.app.services.paimana_ingestion_service import (
     _fetch,
@@ -24,7 +28,6 @@ from backend.app.services.paimana_ingestion_service import (
     parse_project_list,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 MONTHLY = ROOT / "data" / "processed" / "project_monthly_history.csv"
 OUTCOMES = ROOT / "data" / "processed" / "paimana_completed_outcomes.csv"
 
