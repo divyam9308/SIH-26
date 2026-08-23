@@ -9,7 +9,7 @@ jobs:
   experiment-2:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'feature/experiment-hybrid-cost-regime-model'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +21,8 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
+      - name: Audit live PAIMANA monthly coverage
+        run: python scripts/audit_paimana_monthly_coverage.py | tee paimana-monthly-coverage.log
       - name: Python syntax check
         run: python -m compileall -q backend scripts tests
       - name: Focused Experiment 2 tests
@@ -33,6 +35,8 @@ jobs:
         run: python scripts/run_hybrid_cost_regime_experiment.py | tee experiment-2.log
       - name: Print measured Experiment 2 metrics
         run: |
+          echo '--- PAIMANA monthly coverage ---'
+          cat paimana-monthly-coverage.log
           echo '--- Experiment 2 result ---'
           grep 'EXPERIMENT2_RESULT_JSON=' experiment-2.log
           echo '--- Regime distribution ---'
@@ -47,6 +51,7 @@ jobs:
           name: experiment-2-results
           if-no-files-found: error
           path: |
+            paimana-monthly-coverage.log
             experiment-2.log
             reports/experiments/exp2_regime_distribution.json
             reports/experiments/exp2_regime_classifier_metrics.json
