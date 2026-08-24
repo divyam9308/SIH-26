@@ -70,6 +70,7 @@ export const api = {
   predictionValidation: (limit = 100, modelVersion = selectedModel()) => request(withModel(`/api/models/prediction-validation?limit=${limit}`, modelVersion)),
   rollingValidation: (modelVersion = selectedModel()) => request(withModel('/api/models/rolling-validation', modelVersion)),
   retrainModel: (startYear, endYear) => request('/api/models/retrain', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ start_year: Number(startYear), end_year: Number(endYear) }) }, HEAVY_TIMEOUT_MS),
+  residualOverrunExperiment: (startYear, endYear) => request('/api/models/experiments/residual-overrun', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ start_year: Number(startYear), end_year: Number(endYear) }) }, HEAVY_TIMEOUT_MS),
   setValidationModel: (model) => model ? sessionStorage.setItem(SELECTED_MODEL_KEY, model) : sessionStorage.removeItem(SELECTED_MODEL_KEY),
   getValidationModel: () => selectedModel(),
   setActiveLifecycleRun,
@@ -80,8 +81,8 @@ export const api = {
   },
   simulationVersions: () => request('/api/model-simulations', {}, 90000),
   runSimulation: (version) => request(`/api/model-simulations/${encodeURIComponent(version)}/run`, { method: 'POST' }),
-  trainCustomSimulation: (startYear, endYear) => request('/api/model-simulations/custom/train', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ start_year: Number(startYear), end_year: Number(endYear) }),
+  trainCustomSimulation: (startYear, endYear, runId = null) => request('/api/model-simulations/custom/train', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ start_year: Number(startYear), end_year: Number(endYear), run_id: runId }),
   }, HEAVY_TIMEOUT_MS),
   customSimulationProjects: (sessionId, year) => request(`/api/model-simulations/custom/${encodeURIComponent(sessionId)}/projects?year=${encodeURIComponent(year)}`),
   predictCustomSimulation: (sessionId, recordIndex) => request(`/api/model-simulations/custom/${encodeURIComponent(sessionId)}/predict`, {
