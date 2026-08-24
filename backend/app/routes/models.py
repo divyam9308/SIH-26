@@ -5,6 +5,7 @@ from backend.app.services.validation_service import rolling_validation_report, v
 from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
 from backend.app.services.lifecycle_run_service import lifecycle_runs
 from backend.app.services.monthly_prediction_service import lifecycle_comparison, forecast_evolution
+from backend.app.ml.residual_overrun_experiment import run_residual_overrun_experiment
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -35,6 +36,15 @@ def retrain_model(payload: TrainingRange):
     """Retrain the production monthly-lifecycle stack for the selected years."""
     try:
         return retrain_lifecycle(payload.start_year, payload.end_year)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.post("/experiments/residual-overrun")
+def residual_overrun_experiment(payload: TrainingRange):
+    """Run Experiment 3 without replacing the production lifecycle model."""
+    try:
+        return run_residual_overrun_experiment(payload.start_year, payload.end_year)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(409, str(exc))
 
