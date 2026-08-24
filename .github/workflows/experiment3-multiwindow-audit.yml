@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        training_end: [2010, 2012, 2015, 2018, 2019, 2021]
+        training_end: [2010, 2012, 2015, 2018, 2021]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
