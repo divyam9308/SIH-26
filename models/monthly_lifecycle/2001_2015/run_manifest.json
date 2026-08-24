@@ -3,16 +3,22 @@
   "model_family": "monthly_lifecycle",
   "model_version": "monthly-2001-2015",
   "window": "2001_2015",
+  "run_id": null,
+  "dataset_fingerprint": null,
+  "provenance_status": "legacy_artifact_no_recorded_run_identity",
   "training_period": [
     2001,
     2015
   ],
-  "testing_period": [],
-  "feature_count": 3,
+  "testing_period": [
+    2016,
+    2025
+  ],
+  "feature_count": 25,
   "metrics": {
-    "cost_mae": 30.0,
-    "delay_mae": 500.0,
-    "risk_macro_f1": 0.45
+    "cost_mae": 40.265,
+    "delay_mae": 535.48,
+    "risk_macro_f1": 0.4408
   },
   "artifacts": {
     "cost_model.pkl": true,
@@ -24,5 +30,5 @@
     "shap_importance.json": true,
     "prediction_validation.csv": true
   },
-  "created_at": "2026-08-24T17:30:34.097991+00:00"
+  "created_at": "2026-08-23T22:15:57.650757+00:00"
 }
