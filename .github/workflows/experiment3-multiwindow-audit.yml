@@ -1,0 +1,31 @@
+name: Experiment 3 Multiwindow Cost Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  cost-audit:
+    if: github.head_ref == 'audit/experiment3-multiwindow'
+    strategy:
+      fail-fast: false
+      matrix:
+        training_end: [2010, 2012, 2015, 2018, 2021]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run isolated cost audit
+        env:
+          PYTHONPATH: .
+        run: python scripts/audit_experiment3_multiwindow.py --training-end ${{ matrix.training_end }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: experiment3-cost-audit-2001-${{ matrix.training_end }}
+          path: reports/audits/experiment3_cost_audit_2001_${{ matrix.training_end }}.json
