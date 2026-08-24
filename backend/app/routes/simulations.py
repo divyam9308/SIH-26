@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/model-simulations", tags=["model-simulations"])
 class TrainingRange(BaseModel):
     start_year: int
     end_year: int
+    run_id: str | None = None
 
 
 class ProjectSelection(BaseModel):
@@ -49,7 +50,7 @@ def run_simulation(version: str):
 @router.post("/custom/train")
 def train_custom_simulation(payload: TrainingRange):
     try:
-        return train_custom(payload.start_year, payload.end_year)
+        return train_custom(payload.start_year, payload.end_year, payload.run_id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(409, str(exc))
 
