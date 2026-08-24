@@ -147,7 +147,7 @@ def run_residual_overrun_experiment(
     residual_remaining = np.asarray(residual_model.predict(test[features]), dtype=float)
     reconstructed_final = reconstruct_final_overrun(test[CURRENT_OVERRUN], residual_remaining)
 
-    direct_metrics = _regression_metrics(FINAL_TARGET and test[FINAL_TARGET], direct_final, test.sample_weight, test.canonical_project_id)
+    direct_metrics = _regression_metrics(test[FINAL_TARGET], direct_final, test.sample_weight, test.canonical_project_id)
     residual_final_metrics = _regression_metrics(test[FINAL_TARGET], reconstructed_final, test.sample_weight, test.canonical_project_id)
     residual_target_metrics = _regression_metrics(test[RESIDUAL_TARGET], residual_remaining, test.sample_weight, test.canonical_project_id)
 
