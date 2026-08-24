@@ -77,10 +77,19 @@ def lifecycle_runs(models_dir: Path | None = None) -> dict:
         cost = lifecycle_metrics.get("cost") or {}
         delay = lifecycle_metrics.get("delay") or {}
         risk = lifecycle_metrics.get("risk") or {}
+        run_id = metadata.get("run_id") or manifest.get("run_id")
+        dataset_fingerprint = metadata.get("dataset_fingerprint") or manifest.get("dataset_fingerprint")
+        provenance_status = (
+            "verified_runtime_run" if run_id and dataset_fingerprint
+            else manifest.get("provenance_status") or "legacy_artifact_no_recorded_run_identity"
+        )
 
         items.append({
             "window": path.name,
             "model_version": metadata.get("model_version") or f"monthly-{start_year}-{end_year}",
+            "run_id": run_id,
+            "dataset_fingerprint": dataset_fingerprint,
+            "provenance_status": provenance_status,
             "training_start": training[0] if len(training) > 0 else start_year,
             "training_end": training[1] if len(training) > 1 else end_year,
             "testing_start": testing[0] if len(testing) > 0 else None,
@@ -100,7 +109,9 @@ def lifecycle_runs(models_dir: Path | None = None) -> dict:
             "complete": complete,
             "summary_available": has_evaluation,
             "status": "training" if in_progress else ("complete" if complete else ("summary_only" if has_evaluation else "incomplete")),
-            "created_at": manifest.get("created_at") or metadata.get("created_at"),
+            # Metadata is the canonical source; a stale/test-written manifest must
+            # never override the actual training artifact timestamp.
+            "created_at": metadata.get("created_at") or manifest.get("created_at"),
         })
 
     items.sort(key=lambda item: (item["training_start"], item["training_end"]))
