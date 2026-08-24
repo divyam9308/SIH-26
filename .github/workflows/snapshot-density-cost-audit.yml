@@ -1,0 +1,35 @@
+name: Snapshot Density Cost Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  snapshot-density-cost-audit:
+    if: github.head_ref == 'audit/snapshot-density-cost'
+    strategy:
+      fail-fast: false
+      matrix:
+        training_end: [2015, 2021]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Syntax check audit runner
+        run: python -m py_compile scripts/audit_snapshot_density_cost.py
+      - name: Run isolated snapshot-density cost audit
+        env:
+          PYTHONPATH: .
+        run: python scripts/audit_snapshot_density_cost.py --training-end ${{ matrix.training_end }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-density-cost-audit-2001-${{ matrix.training_end }}
+          path: |
+            reports/audits/snapshot_density_cost_audit_2001_${{ matrix.training_end }}.json
+            reports/audits/snapshot_density_additional_cost_projects_2001_${{ matrix.training_end }}.csv
