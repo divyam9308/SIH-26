@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from functools import lru_cache
+import hashlib
 import json
+import uuid
 
 import pandas as pd
 
@@ -41,6 +43,39 @@ def _training_data() -> tuple[pd.DataFrame, pd.DataFrame, int, int]:
     return data.copy(), identity.copy(), min_year, max_year
 
 
+def _dataset_fingerprint(data: pd.DataFrame) -> str:
+    """Return a stable content fingerprint for the prepared lifecycle cohort.
+
+    The hash deliberately covers every prepared column, not just row counts, so
+    a changed PAIMANA value, identity link, target, feature or snapshot date
+    changes the fingerprint. Column and row ordering are normalised first.
+    """
+    if data.empty:
+        return "sha256:" + hashlib.sha256(b"").hexdigest()
+    stable = data.copy()
+    stable = stable.reindex(sorted(stable.columns), axis=1)
+    sort_columns = [name for name in ("canonical_project_id", "snapshot_date", "completion_year") if name in stable]
+    if sort_columns:
+        stable = stable.sort_values(sort_columns, kind="mergesort", na_position="last")
+    stable = stable.reset_index(drop=True)
+    canonical = stable.astype("string").fillna("<NA>")
+    row_hashes = pd.util.hash_pandas_object(canonical, index=False, categorize=True).to_numpy().tobytes()
+    return "sha256:" + hashlib.sha256(row_hashes).hexdigest()
+
+
+def _attach_run_provenance(start_year: int, end_year: int, result: dict, run_id: str, dataset_fingerprint: str) -> None:
+    """Persist run identity into the canonical metadata/evaluation artifacts."""
+    metadata = result.setdefault("metadata", {})
+    metadata["run_id"] = run_id
+    metadata["dataset_fingerprint"] = dataset_fingerprint
+    result["run_id"] = run_id
+    result["dataset_fingerprint"] = dataset_fingerprint
+    target = MODEL_ROOT / f"{start_year}_{end_year}"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "metadata.json").write_text(json.dumps(metadata, indent=2, allow_nan=False))
+    (target / "evaluation_results.json").write_text(json.dumps(result, indent=2, allow_nan=False))
+
+
 def _write_run_manifest(start_year: int, end_year: int, result: dict) -> None:
     target = MODEL_ROOT / f"{start_year}_{end_year}"
     metadata = result.get("metadata") or {}
@@ -55,11 +90,16 @@ def _write_run_manifest(start_year: int, end_year: int, result: dict) -> None:
         "shap_importance.json",
         "prediction_validation.csv",
     ]
+    run_id = metadata.get("run_id") or result.get("run_id")
+    dataset_fingerprint = metadata.get("dataset_fingerprint") or result.get("dataset_fingerprint")
     payload = {
         "status": "complete",
         "model_family": "monthly_lifecycle",
         "model_version": metadata.get("model_version") or f"monthly-{start_year}-{end_year}",
         "window": f"{start_year}_{end_year}",
+        "run_id": run_id,
+        "dataset_fingerprint": dataset_fingerprint,
+        "provenance_status": "verified_runtime_run" if run_id and dataset_fingerprint else "legacy_artifact_no_recorded_run_identity",
         "training_period": metadata.get("training_period") or [start_year, end_year],
         "testing_period": metadata.get("testing_period") or [],
         "feature_count": len(metadata.get("features_used") or []),
@@ -99,14 +139,19 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         raise ValueError("The selected period has no identity-verified lifecycle training projects.")
     internal_validation_year = int(selected_training_years.max())
 
+    run_id = uuid.uuid4().hex
+    dataset_fingerprint = _dataset_fingerprint(data)
     target = MODEL_ROOT / f"{start_year}_{end_year}"
     target.mkdir(parents=True, exist_ok=True)
     training_marker = target / ".training"
     training_marker.write_text(datetime.now(timezone.utc).isoformat())
 
-    result = train_window(start_year, end_year, max_year, data=data, identity=identity)
-    _write_run_manifest(start_year, end_year, result)
-    training_marker.unlink(missing_ok=True)
+    try:
+        result = train_window(start_year, end_year, max_year, data=data, identity=identity)
+        _attach_run_provenance(start_year, end_year, result, run_id, dataset_fingerprint)
+        _write_run_manifest(start_year, end_year, result)
+    finally:
+        training_marker.unlink(missing_ok=True)
 
     metadata = result["metadata"]
     lifecycle = result["lifecycle"]
@@ -124,6 +169,9 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "model_family": "monthly_lifecycle",
         "model_version": metadata["model_version"],
         "window": f"{start_year}_{end_year}",
+        "run_id": run_id,
+        "dataset_fingerprint": dataset_fingerprint,
+        "created_at": metadata.get("created_at"),
         "training_years": f"{start_year}-{end_year}",
         "testing_years": f"{end_year + 1}-{max_year}",
         "training_samples": metadata["training_snapshots"],
@@ -151,6 +199,9 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
                     "data_quality_score": feature_audit.get("data_quality_score"),
                     "removed_invalid_feature_count": feature_audit.get("removed_invalid_feature_count", len(feature_audit.get("removed_features", []))),
                 },
+                "run_id": run_id,
+                "dataset_fingerprint": dataset_fingerprint,
+                "created_at": metadata.get("created_at"),
                 "leakage_policy": metadata.get("leakage_policy"),
                 "snapshot_weighting_policy": metadata.get("snapshot_weighting_policy"),
             },
