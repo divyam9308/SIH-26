@@ -26,3 +26,42 @@ jobs:
         run: npm run build --prefix frontend
       - name: Run tests
         run: pytest -q
+
+  residual-experiment:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/provenance-and-residual-experiment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run real 2001-2015 residual comparison
+        run: |
+          python - <<'PY'
+          import json
+          from backend.app.ml.residual_overrun_experiment import run_residual_overrun_experiment
+
+          report = run_residual_overrun_experiment(2001, 2015, persist=True)
+          summary = {
+              'training_period': report['training_period'],
+              'testing_period': report['testing_period'],
+              'training_rows': report['comparison_control']['training_rows'],
+              'training_projects': report['comparison_control']['training_projects'],
+              'test_rows': report['comparison_control']['test_rows'],
+              'test_projects': report['comparison_control']['test_projects'],
+              'algorithm': report['selected_algorithm'],
+              'direct_mae': report['direct_final_overrun_metrics']['MAE'],
+              'residual_final_mae': report['residual_reconstructed_final_overrun_metrics']['MAE'],
+              'improvement_percentage': report['final_mae_improvement_percentage'],
+              'success_threshold_passed': report['success_threshold']['passed'],
+          }
+          print('RESIDUAL_EXPERIMENT_SUMMARY=' + json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: residual-overrun-2001-2015
+          path: reports/experiments/residual_overrun_2001_2015*
