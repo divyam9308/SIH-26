@@ -1,0 +1,37 @@
+name: Training Window Common Holdout Audit
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/audit_training_window_common_holdout.py'
+      - '.github/workflows/training-window-common-holdout-audit.yml'
+      - 'backend/app/ml/**'
+      - 'data/**'
+      - 'requirements*.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cost-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run common-holdout training-window audit
+        env:
+          PYTHONPATH: .
+        run: python scripts/audit_training_window_common_holdout.py
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-window-common-holdout-audit
+          path: reports/audits/training_window_common_holdout.json
+          if-no-files-found: error
