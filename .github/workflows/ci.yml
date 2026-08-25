@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run cost audit for 2001-${{ matrix.training_end }}
-        run: python scripts/audit_experiment3_window.py --training-end ${{ matrix.training_end }}
+        run: PYTHONPATH=. python scripts/audit_experiment3_window.py --training-end ${{ matrix.training_end }}
       - uses: actions/upload-artifact@v4
         with:
           name: experiment3-cost-audit-2001-${{ matrix.training_end }}
