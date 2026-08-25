@@ -17,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Freshly train and evaluate all three windows
-        run: python scripts/audit_fresh_three_window_25f.py
+        run: PYTHONPATH=. python scripts/audit_fresh_three_window_25f.py
       - uses: actions/upload-artifact@v4
         with:
           name: fresh-three-window-25f-audit
