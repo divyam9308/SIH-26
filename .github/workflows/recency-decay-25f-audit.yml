@@ -1,0 +1,37 @@
+name: Temporary 25F Recency Decay Audit
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/audit_recency_decay_25f.py'
+      - '.github/workflows/recency-decay-25f-audit.yml'
+      - 'backend/app/ml/**'
+      - 'data/**'
+      - 'requirements*.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recency-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run temporary 25-feature recency-decay audit
+        env:
+          PYTHONPATH: .
+        run: python scripts/audit_recency_decay_25f.py
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: recency-decay-25f-audit
+          path: reports/audits/recency_decay_25f_audit.json
+          if-no-files-found: error
