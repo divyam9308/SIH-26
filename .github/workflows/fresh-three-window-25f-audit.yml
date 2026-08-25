@@ -7,7 +7,7 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,9 +17,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Freshly train and evaluate current 25-feature cost models
-        run: PYTHONPATH=. python scripts/audit_fresh_three_window_cost_25f.py
+        run: PYTHONPATH=. python scripts/audit_fresh_cost_three_window_25f.py
       - uses: actions/upload-artifact@v4
         with:
-          name: fresh-three-window-cost-25f-audit
-          path: audit_outputs/fresh_three_window_cost_25f.json
+          name: fresh-three-window-25f-audit
+          path: audit_outputs/fresh_three_window_25f.json
           if-no-files-found: error
