@@ -7,10 +7,6 @@ on:
 jobs:
   snapshot-density-cost-audit:
     if: github.head_ref == 'audit/snapshot-density-cost'
-    strategy:
-      fail-fast: false
-      matrix:
-        training_end: [2010, 2012, 2018]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -21,15 +17,13 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-      - name: Syntax check audit runner
-        run: python -m py_compile scripts/audit_snapshot_density_cost.py
-      - name: Run isolated snapshot-density cost audit
+      - name: Syntax check optimized audit runner
+        run: python -m py_compile scripts/audit_snapshot_density_cost.py scripts/audit_snapshot_density_cost_fast.py
+      - name: Run optimized isolated 2001-2018 snapshot-density cost audit
         env:
           PYTHONPATH: .
-        run: python scripts/audit_snapshot_density_cost.py --training-end ${{ matrix.training_end }}
+        run: python scripts/audit_snapshot_density_cost_fast.py --training-end 2018
       - uses: actions/upload-artifact@v4
         with:
-          name: snapshot-density-cost-audit-2001-${{ matrix.training_end }}
-          path: |
-            reports/audits/snapshot_density_cost_audit_2001_${{ matrix.training_end }}.json
-            reports/audits/snapshot_density_additional_cost_projects_2001_${{ matrix.training_end }}.csv
+          name: snapshot-density-cost-fast-audit-2001-2018
+          path: reports/audits/snapshot_density_cost_fast_audit_2001_2018.json
