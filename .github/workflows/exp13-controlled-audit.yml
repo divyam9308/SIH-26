@@ -1,0 +1,55 @@
+name: Experiment 13 controlled audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/adapter_exp13.py'
+      - 'backend/app/ml/experiments/trajectory_exp13.py'
+      - 'scripts/run_exp13_fast_compare.py'
+      - 'tests/test_exp13_trajectory_regime.py'
+      - '.github/workflows/exp13-controlled-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: '2001-2019'
+            start: 2001
+            end: 2019
+          - label: '2001-2021'
+            start: 2001
+            end: 2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Validate Python sources
+        run: python -m compileall -q backend scripts tests
+      - name: Run focused Experiment 13 tests
+        run: pytest tests/test_exp13_trajectory_regime.py tests/test_exp12_trajectory.py -q
+      - name: Run controlled temporal comparison
+        run: |
+          mkdir -p reports/experiments
+          python scripts/run_exp13_fast_compare.py \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --output reports/experiments/exp13_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp13-audit-${{ matrix.label }}
+          path: |
+            reports/experiments/exp13_${{ matrix.start }}_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_13/**
+          if-no-files-found: warn
