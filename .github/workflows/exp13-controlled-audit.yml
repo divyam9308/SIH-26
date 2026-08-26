@@ -11,6 +11,7 @@ on:
       - '.github/workflows/exp13-controlled-audit.yml'
   workflow_dispatch:
 
+# Keep this workflow path-scoped so Exp13 reruns only when its audit contract changes.
 jobs:
   audit:
     runs-on: ubuntu-latest
