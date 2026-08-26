@@ -22,7 +22,18 @@ def _history() -> pd.DataFrame:
     revised = [100, 100, 102, 105, 112, 122, 136, 153]
     spend = [8, 15, 23, 31, 40, 50, 61, 73]
     slip = [0, 0, 5, 12, 28, 52, 85, 125]
-    dates = pd.date_range("2021-01-31", periods=8, freq="ME")
+    dates = pd.to_datetime(
+        [
+            "2021-01-31",
+            "2021-02-28",
+            "2021-03-31",
+            "2021-04-30",
+            "2021-05-31",
+            "2021-06-30",
+            "2021-07-31",
+            "2021-08-31",
+        ]
+    )
     for i, stamp in enumerate(dates):
         rows.append(
             {
