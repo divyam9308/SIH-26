@@ -10,7 +10,13 @@ from backend.app.ml.experiments.trajectory_exp13 import (
     fit_experiment,
     predict_project,
 )
+from backend.app.ml.production_cost_baseline import enrich_supervised_for_production
 
 
 def fit_against_production(**kwargs):
-    return fit_experiment(**kwargs)
+    # Production cost already uses the promoted Exp12 trajectory representation.
+    # Exp13 must start from that exact evidence contract, then add only its new
+    # regime/context features on top.
+    enriched = dict(kwargs)
+    enriched["data"] = enrich_supervised_for_production(kwargs["data"].copy())
+    return fit_experiment(**enriched)
