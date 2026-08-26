@@ -26,6 +26,7 @@ ALLOWED_CHANGED_DIMENSIONS = {
     "loss_function",
     "model_routing",
     "sampling",
+    "trajectory_regime_context",
     "weighting",
     "other",
 }
