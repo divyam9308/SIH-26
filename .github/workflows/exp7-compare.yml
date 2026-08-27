@@ -5,7 +5,11 @@ on:
     branches: [main]
     paths:
       - 'backend/app/ml/experiments/hierarchical_residual_priors_exp7.py'
+      - 'backend/app/ml/experiments/runtime_exp7.py'
+      - 'backend/app/ml/experiments/adapter_exp7.py'
+      - 'tests/test_exp7_hierarchical_priors.py'
       - '.github/workflows/exp7-compare.yml'
+      - 'backend/app/services/lifecycle_model_comparison_service.py'
       - 'backend/app/ml/production_cost_baseline.py'
       - 'backend/app/ml/monthly_lifecycle.py'
       - 'backend/app/ml/monthly_training.py'
@@ -14,18 +18,16 @@ on:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - training_start: 2001
             training_end: 2019
-            test_end: 2024
             window: 2001_2019
           - training_start: 2001
             training_end: 2021
-            test_end: 2024
             window: 2001_2021
     steps:
       - uses: actions/checkout@v4
@@ -37,35 +39,46 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Validate sources
         run: python -m compileall -q backend scripts tests
-      - name: Run Experiment 7
+      - name: Run Experiment 7 tests
+        run: PYTHONPATH=. pytest -q tests/test_exp7_hierarchical_priors.py
+      - name: Run fresh production vs Experiment 7
         env:
           PYTHONPATH: ${{ github.workspace }}
+          START_YEAR: ${{ matrix.training_start }}
+          END_YEAR: ${{ matrix.training_end }}
         run: |
-          python scripts/run_ml_experiment.py \
-            --callable backend.app.ml.experiments.hierarchical_residual_priors_exp7:run_experiment \
-            --start ${{ matrix.training_start }} \
-            --end ${{ matrix.training_end }} \
-            --test-end ${{ matrix.test_end }}
-      - name: Print comparison
-        run: |
+          mkdir -p audit_outputs
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
-          p = Path('reports/experiments/exp_7/${{ matrix.window }}/result.json')
-          r = json.loads(p.read_text())
-          m = r['metrics']
-          print('WINDOW=${{ matrix.window }}')
-          print(f"BASELINE_COST_MAE={m['baseline_cost_mae']:.8f}")
-          print(f"EXP7_COST_MAE={m['experiment_cost_mae']:.8f}")
-          print(f"IMPROVEMENT_PERCENT={m['improvement_percentage']:.6f}")
-          print(f"DECISION={r['decision']}")
-          print(f"COST_FEATURE_COUNT={r['cost_feature_count']}")
+          from backend.app.services.lifecycle_model_comparison_service import retrain_and_compare
+
+          start = int(os.environ['START_YEAR'])
+          end = int(os.environ['END_YEAR'])
+          result = retrain_and_compare(start, end, 'exp_7')
+          overall = result['overall_comparison']
+          payload = {
+              'window': f'{start}_{end}',
+              'production': result.get('production'),
+              'experiment': result.get('experiment'),
+              'overall_comparison': overall,
+              'session': result.get('session'),
+          }
+          out = Path('audit_outputs') / f'exp7_compare_{start}_{end}.json'
+          out.write_text(json.dumps(payload, indent=2, default=str, allow_nan=False) + '\n')
+          print(f'WINDOW={start}_{end}')
+          print(f"PRODUCTION_COST_MAE={overall['production_cost_mae']:.6f}")
+          print(f"EXP7_COST_MAE={overall['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={overall['cost_improvement_percentage']:.6f}")
+          print(f"PRODUCTION_DELAY_MAE_RETAINED={overall.get('production_delay_mae')}")
+          print('DELAY_POLICY=production_retained')
+          verdict = 'PROMOTION CANDIDATE' if overall['cost_improvement_percentage'] > 0 else 'REGRESSION / DO NOT PROMOTE'
+          print(f'VERDICT={verdict}')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: exp7-results-${{ matrix.window }}
-          path: |
-            reports/experiments/exp_7/${{ matrix.window }}/**
-            reports/experiments/registry_entries/exp_7/**
+          path: audit_outputs/exp7_compare_${{ matrix.training_start }}_${{ matrix.training_end }}.json
           if-no-files-found: warn
