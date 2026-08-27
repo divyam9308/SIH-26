@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'backend/app/ml/experiments/geographic_priors_exp23.py'
+      - 'backend/app/ml/experiments/runtime_exp23.py'
       - 'backend/app/ml/experiments/adapter_exp23.py'
       - 'tests/test_exp23_geographic_priors.py'
       - '.github/workflows/exp23-compare.yml'
