@@ -1,0 +1,39 @@
+name: Experiment 5 vs Current Production
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/ml/experiments/common_holdout_training_window.py'
+      - 'backend/app/ml/experiments/adapter_exp5.py'
+      - 'backend/app/ml/production_cost_baseline.py'
+      - 'scripts/run_exp5_vs_current_production.py'
+      - 'tests/test_experiment_5_common_holdout.py'
+      - 'tests/test_exp5_current_production_adapter.py'
+      - '.github/workflows/exp5-vs-production.yml'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Focused Experiment 5 tests
+        run: pytest -q tests/test_experiment_5_common_holdout.py tests/test_exp5_current_production_adapter.py tests/test_lifecycle_model_comparison.py
+      - name: Run fixed-holdout production comparison
+        run: python scripts/run_exp5_vs_current_production.py
+      - name: Publish comparison summary
+        run: cat reports/experiments/exp5_vs_current_production.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload comparison evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp5-vs-current-production
+          path: |
+            reports/experiments/exp5_vs_current_production.json
+            reports/experiments/exp5_vs_current_production.md
+          if-no-files-found: error
