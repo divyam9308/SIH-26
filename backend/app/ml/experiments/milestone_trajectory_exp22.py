@@ -1,9 +1,10 @@
 """Experiment 22: milestone-achievement trajectory features.
 
 Milestone values are parsed from the same official PAIMANA snapshot (for example
-"6/14"). Any trajectory feature is computed only from the current and earlier
-snapshots of the same canonical project. Missing milestone eras remain missing;
-no future/backfill imputation is performed.
+"6/14"). Trajectory features are engineered on the full official monthly history
+and then joined onto the quarterly supervised frame. Every value at snapshot t
+uses only t and earlier rows of that same canonical project; missing milestone
+eras remain missing and no future/backfill imputation is performed.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from backend.app.ml.monthly_lifecycle import build_training_dataset
+from backend.app.ml.monthly_lifecycle import TRAJECTORIES, build_training_dataset
 from backend.app.ml.monthly_training import _fit_pipeline, _regression_metrics, _regressors, temporal_project_split
 from backend.app.ml.production_cost_baseline import (
     PRODUCTION_COST_SEED,
@@ -40,6 +41,7 @@ MILESTONE_FEATURES = [
 
 
 def add_milestone_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Engineer milestone features causally on whatever history frame is supplied."""
     result = frame.copy()
     status = result.get("milestone_status", pd.Series(None, index=result.index)).astype("string")
     parts = status.str.extract(r"(?P<done>\d+)\s*/\s*(?P<total>\d+)")
@@ -85,6 +87,27 @@ def add_milestone_features(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def enrich_with_monthly_milestones(frame: pd.DataFrame, history: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Join features engineered on full monthly history to supervised snapshots."""
+    supervised = frame.copy()
+    supervised["snapshot_date"] = pd.to_datetime(supervised["snapshot_date"], errors="coerce")
+    supervised["canonical_project_id"] = supervised["canonical_project_id"].astype("string")
+    if history is None:
+        if TRAJECTORIES.exists():
+            history = pd.read_csv(TRAJECTORIES, dtype={"canonical_project_id": "string"}, low_memory=False)
+        else:
+            history = supervised.copy()
+    monthly = history.copy()
+    monthly["snapshot_date"] = pd.to_datetime(monthly["snapshot_date"], errors="coerce")
+    monthly["canonical_project_id"] = monthly["canonical_project_id"].astype("string")
+    monthly = add_milestone_features(monthly)
+    lookup = monthly[["canonical_project_id", "snapshot_date", *MILESTONE_FEATURES]].drop_duplicates(
+        ["canonical_project_id", "snapshot_date"], keep="last"
+    )
+    supervised = supervised.drop(columns=[name for name in MILESTONE_FEATURES if name in supervised], errors="ignore")
+    return supervised.merge(lookup, on=["canonical_project_id", "snapshot_date"], how="left", validate="many_to_one")
+
+
 def _improvement(base: float, challenger: float) -> float:
     return (base - challenger) / base * 100.0 if base else 0.0
 
@@ -106,7 +129,7 @@ def run_experiment(training_start: int, training_end: int, test_end: int) -> dic
 
         enriched = enrich_supervised_for_production(data.copy())
         enriched["completion_year"] = pd.to_numeric(enriched.completion_year, errors="coerce")
-        enriched = add_milestone_features(enriched)
+        enriched = enrich_with_monthly_milestones(enriched)
         train, test = temporal_project_split(enriched, training_start, training_end, test_end)
 
         prod_cost = joblib.load(artifact_dir / "cost_model.pkl")
@@ -143,13 +166,14 @@ def run_experiment(training_start: int, training_end: int, test_end: int) -> dic
                 "production_cost": base_cost, "experiment_cost": exp_cost, "production_delay": base_delay, "experiment_delay": exp_delay,
             },
             "coverage": {
+                "feature_history_granularity": "full official monthly history",
                 "training_milestone_snapshot_share": float(train_ratio.mean()),
                 "test_milestone_snapshot_share": float(test_ratio.mean()),
                 "training_projects_with_milestones": int(train.loc[train_ratio, "canonical_project_id"].nunique()),
                 "test_projects_with_milestones": int(test.loc[test_ratio, "canonical_project_id"].nunique()),
                 "test_projects": int(test.canonical_project_id.nunique()), "test_snapshots": int(len(test)),
             },
-            "leakage_policy": "Milestone numerator/denominator comes from the current snapshot. Velocity, delta, stagnation and months-since-change use only prior/current rows of the same project; no future backfill is used.",
+            "leakage_policy": "Milestone numerator/denominator comes from the current snapshot. Velocity, delta, stagnation and months-since-change are engineered on the full official monthly history using only prior/current rows of the same project, then joined to supervised snapshots; no future backfill is used.",
             "production_changed": False,
         }
         out = REPORT_ROOT / f"{training_start}_{training_end}"
