@@ -52,8 +52,6 @@ EXPERIMENT_SCOPE = "cost_delay"
 EXPERIMENT_SEQUENCE = 13
 IMPLEMENTATION_REVISION = "v2_learned_regimes_multifold_stage_priority"
 
-# These are leakage-safe Exp12 signals.  The unsupervised regime model learns how
-# they co-occur rather than assigning a manually designed pressure formula.
 REGIME_INPUTS = [
     "exp12_cost_growth_pct_3m",
     "exp12_cost_growth_pct_6m",
@@ -125,12 +123,6 @@ def _numeric(frame: pd.DataFrame, name: str) -> np.ndarray:
 
 
 def _online_cusum(values: np.ndarray, *, min_history: int = 4, drift: float = 0.5, threshold: float = 4.0):
-    """Past-only online two-sided CUSUM.
-
-    The baseline for observation t uses only earlier observations from that
-    project.  A detected event resets the cumulative statistic so repeated
-    structural changes can be represented without peeking forward.
-    """
     values = np.asarray(values, dtype=float)
     score = np.zeros(len(values), dtype=float)
     event = np.zeros(len(values), dtype=float)
@@ -164,7 +156,6 @@ def _online_cusum(values: np.ndarray, *, min_history: int = 4, drift: float = 0.
 
 
 def engineer_change_points(history: pd.DataFrame) -> pd.DataFrame:
-    """Attach online change-point features to leakage-safe Exp12 history."""
     frame = engineer_exp12_history(history).copy()
     for name in CHANGE_POINT_FEATURES:
         frame[name] = np.nan
@@ -190,7 +181,6 @@ def engineer_change_points(history: pd.DataFrame) -> pd.DataFrame:
 
 
 def enrich_base_rows(supervised: pd.DataFrame, history: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Merge raw leakage-safe trajectory inputs and CUSUM context onto supervised rows."""
     if history is None:
         if not TRAJECTORIES.exists():
             raise FileNotFoundError("Experiment 13 requires paimana_project_trajectories.csv.")
@@ -204,12 +194,13 @@ def enrich_base_rows(supervised: pd.DataFrame, history: pd.DataFrame | None = No
         *CHANGE_POINT_FEATURES,
         "exp12_history_12m",
     ]
-    lookup = source[lookup_columns].drop_duplicates(
-        ["canonical_project_id", "snapshot_date"], keep="last"
-    )
+    lookup = source[lookup_columns].drop_duplicates(["canonical_project_id", "snapshot_date"], keep="last")
     rows = supervised.copy()
     rows["snapshot_date"] = pd.to_datetime(rows["snapshot_date"], errors="coerce")
-    drop_existing = [name for name in lookup_columns if name not in {"canonical_project_id", "snapshot_date"} and name in rows]
+    drop_existing = [
+        name for name in lookup_columns
+        if name not in {"canonical_project_id", "snapshot_date"} and name in rows
+    ]
     if drop_existing:
         rows = rows.drop(columns=drop_existing)
     result = rows.merge(
@@ -277,9 +268,12 @@ def apply_regime_encoder(frame: pd.DataFrame, encoder: LearnedRegimeEncoder) -> 
 
 
 def stage_aware_training_weights(frame: pd.DataFrame) -> pd.DataFrame:
-    """Prioritize decision-useful early/mid snapshots during challenger fitting."""
     result = frame.copy()
-    base = pd.to_numeric(result.get("sample_weight", 1.0), errors="coerce").fillna(0.0).to_numpy(float)
+    if "sample_weight" in result:
+        base_series = pd.to_numeric(result["sample_weight"], errors="coerce").fillna(0.0)
+    else:
+        base_series = pd.Series(1.0, index=result.index, dtype=float)
+    base = base_series.to_numpy(float)
     if "lifecycle_stage" in result:
         stage = result.lifecycle_stage.astype("string").str.lower()
         multiplier = stage.map(_STAGE_TRAIN_MULTIPLIER).fillna(1.0).to_numpy(float)
@@ -369,7 +363,6 @@ def _select_target_features(
     algorithm: str,
     seed: int,
 ) -> tuple[list[str], str, dict]:
-    """Require a learned-regime group to generalize across rolling historical folds."""
     folds = rolling_temporal_folds(train, max_folds=3)
     group_records: dict[str, list[dict]] = {name: [] for name in _candidate_groups()}
     for fold_index, (fit_years, validation_years) in enumerate(folds):
@@ -379,7 +372,6 @@ def _select_target_features(
         fitting = apply_regime_encoder(fitting_raw, encoder)
         validation = apply_regime_encoder(validation_raw, encoder)
         fitting = stage_aware_training_weights(fitting)
-        # Evaluation weights stay project-balanced; only the fitting objective is stage-aware.
         for group_name, added in _candidate_groups().items():
             features = list(dict.fromkeys(production_features + added))
             model = _fit_pipeline(_regressors(seed + fold_index)[algorithm], fitting, features, target)
@@ -419,14 +411,10 @@ def _select_target_features(
         summary[group_name]["objective_gain_vs_stage_weighted_production_pct"] = round(mean_gain, 6)
         summary[group_name]["winning_folds"] = wins
         summary[group_name]["worst_fold_gain_pct"] = round(worst, 6)
-        # Require a repeatable gain, not a one-window lucky result.
         if mean_gain >= 0.25 and wins >= max(2, len(folds) - 1) and worst > -1.5:
             eligible.append((group_name, mean_gain, wins, worst))
 
-    if eligible:
-        winner_name = max(eligible, key=lambda item: item[1])[0]
-    else:
-        winner_name = baseline_name
+    winner_name = max(eligible, key=lambda item: item[1])[0] if eligible else baseline_name
     added = _candidate_groups()[winner_name]
     audit = {
         "fold_count": len(folds),
@@ -456,7 +444,7 @@ def fit_experiment(
     base_train, base_test = temporal_project_split(frozen, training_start, training_end, test_end)
 
     enriched_base = enrich_base_rows(frozen, history)
-    train_raw, test_raw = temporal_project_split(enriched_base, training_start, training_end, test_end)
+    train_raw, _ = temporal_project_split(enriched_base, training_start, training_end, test_end)
     metadata = dict(production_bundle.get("metadata") or {})
     contract = target_feature_contract(metadata)
     production_cost_features = list(contract["cost"])
@@ -486,16 +474,12 @@ def fit_experiment(
         _regressors(27304)[delay_name], fit_train, delay_features, "actual_delay_days"
     )
 
-    compare = test[
-        pd.to_numeric(test.exp12_history_12m, errors="coerce").fillna(0).ge(MIN_HISTORY)
-    ].copy()
+    compare = test[pd.to_numeric(test.exp12_history_12m, errors="coerce").fillna(0).ge(MIN_HISTORY)].copy()
     if compare.canonical_project_id.nunique() < 2:
         raise ValueError("Experiment 13 v2 has too few future projects with usable history.")
     compare = assign_project_balanced_weights(compare)
     compare["production_cost"] = production_bundle["cost"].predict(compare[production_cost_features])
-    compare["production_delay"] = np.maximum(
-        0, production_bundle["delay"].predict(compare[production_delay_features])
-    )
+    compare["production_delay"] = np.maximum(0, production_bundle["delay"].predict(compare[production_delay_features]))
     compare["experiment_cost"] = cost_model.predict(compare[cost_features])
     compare["experiment_delay"] = np.maximum(0, delay_model.predict(compare[delay_features]))
 
@@ -544,10 +528,7 @@ def fit_experiment(
             "production_delay_mae": _macro(production_stage, "delay"),
             "experiment_delay_mae": _macro(experiment_stage, "delay"),
         },
-        "internal_feature_selection": {
-            "cost": cost_internal,
-            "delay": delay_internal,
-        },
+        "internal_feature_selection": {"cost": cost_internal, "delay": delay_internal},
         "scientific_decision": "PENDING_TWO_WINDOW_AUDIT",
     }
 
@@ -561,9 +542,7 @@ def fit_experiment(
         training_start=training_start,
         training_end=training_end,
         testing_end=test_end,
-        weighting_policy=(
-            "stage-aware challenger training (early/mid prioritized); project-balanced quarterly evaluation"
-        ),
+        weighting_policy="stage-aware challenger training (early/mid prioritized); project-balanced quarterly evaluation",
     )
     leakage_policy = (
         "Exp13 v2 derives Exp12 trajectories and online CUSUM change scores from current/earlier reports only. "
@@ -632,9 +611,9 @@ def fit_experiment(
 
     selected_added = list(dict.fromkeys(cost_added + delay_added))
     context_for_prediction = list(dict.fromkeys(selected_added + REGIME_FEATURES + CHANGE_POINT_FEATURES))
-    lookup_rows = enriched[
-        ["canonical_project_id", "snapshot_date", *context_for_prediction]
-    ].drop_duplicates(["canonical_project_id", "snapshot_date"], keep="last")
+    lookup_rows = enriched[["canonical_project_id", "snapshot_date", *context_for_prediction]].drop_duplicates(
+        ["canonical_project_id", "snapshot_date"], keep="last"
+    )
     lookup = {
         (str(row.canonical_project_id), pd.Timestamp(row.snapshot_date).isoformat()): {
             feature: row.get(feature) for feature in context_for_prediction
