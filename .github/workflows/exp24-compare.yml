@@ -1,4 +1,4 @@
-name: Experiment 24 obstruction reason comparison
+name: Experiment 24 official obstruction comparison
 
 on:
   pull_request:
@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/app/ml/experiments/obstruction_reasons_exp24.py'
       - 'backend/app/ml/experiments/adapter_exp24.py'
+      - 'data/processed/exp24_official_obstruction_history.csv'
       - 'tests/test_exp24_obstruction_reasons.py'
       - '.github/workflows/exp24-compare.yml'
   workflow_dispatch:
@@ -32,7 +33,7 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Run Experiment 24 tests
         run: PYTHONPATH=. pytest -q tests/test_exp24_obstruction_reasons.py
-      - name: Audit evidence and compare to production
+      - name: Run production vs Experiment 24
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -51,13 +52,16 @@ jobs:
           m=r['metrics']; c=r['coverage']
           print(f'WINDOW={start}_{end}')
           print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
-          print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']}")
-          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']}")
+          print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']:.6f}")
           print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
-          print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']}")
-          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']}")
-          print(f"REASON_COLUMNS={c['candidate_reason_columns_present']}")
-          print(f"TRAINING_PROJECTS_WITH_REASON={c['training_projects_with_reason']}")
+          print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']:.6f}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"OFFICIAL_SOURCE_ROWS={c['official_source_rows']}")
+          print(f"MATCHED_SOURCE_ROWS={c['matched_source_rows']}")
+          print(f"TRAINING_PROJECTS_WITH_ASOF_REASON={c['training_projects_with_asof_reason']}")
+          print(f"TEST_PROJECTS_WITH_ASOF_REASON={c['test_projects_with_asof_reason']}")
+          print(f"TEST_REASON_SNAPSHOT_SHARE={c['test_reason_snapshot_share']:.6f}")
           print(f"SCIENTIFIC_STATUS={r['scientific_status']}")
           print(f"VERDICT={r['decision']}")
           PY
