@@ -6,13 +6,14 @@ from backend.app.ml.experiments.scope_semantics_exp21 import add_structured_scop
 
 
 def test_scope_features_extract_engineering_signal() -> None:
-    frame = pd.DataFrame({"project_name": ["Phase 2 construction of 14.5 km tunnel and bridge, 500 MW"]})
+    frame = pd.DataFrame({"project_name": ["Phase 2 construction of 14.5 km tunnel and bridge, 500 MW augmentation"]})
     out = add_structured_scope_features(frame).iloc[0]
     assert out.exp21_phase_number == 2
     assert out.exp21_length_km == 14.5
     assert out.exp21_capacity_mw == 500
     assert out.exp21_tunnel == 1
     assert out.exp21_bridge == 1
+    assert out.exp21_expansion == 1
     assert out.exp21_numeric_tokens >= 3
 
 
