@@ -38,6 +38,8 @@ jobs:
       - name: Validate sources
         run: python -m compileall -q backend scripts tests
       - name: Run Experiment 7
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python scripts/run_ml_experiment.py \
             --callable backend.app.ml.experiments.hierarchical_residual_priors_exp7:run_experiment \
