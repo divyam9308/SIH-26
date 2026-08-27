@@ -68,7 +68,7 @@ def add_structured_scope_features(frame: pd.DataFrame) -> pd.DataFrame:
         "exp21_rail": r"\brail(?:way)?\b|\bmetro\b|\bnew line\b|\bgauge conversion\b",
         "exp21_port": r"\bport\b|\bharbour\b|\bharbor\b",
         "exp21_highway": r"\bhighway\b|\bnh[- ]?\d+\b|\bfour[- ]lan|\bsix[- ]lan",
-        "exp21_expansion": r"\bexpansion\b|\baugmentation\b",
+        "exp21_expansion": r"\bexpansion\b|\baugmentation\b",
         "exp21_redevelopment": r"\bredevelopment\b|\bmodernisation\b|\bmodernization\b",
         "exp21_greenfield": r"\bgreenfield\b",
     }
