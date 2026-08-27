@@ -26,7 +26,7 @@ jobs:
       - name: Focused Experiment 5 tests
         run: pytest -q tests/test_experiment_5_common_holdout.py tests/test_exp5_current_production_adapter.py tests/test_lifecycle_model_comparison.py
       - name: Run fixed-holdout production comparison
-        run: python scripts/run_exp5_vs_current_production.py
+        run: PYTHONPATH=. python scripts/run_exp5_vs_current_production.py
       - name: Publish comparison summary
         run: cat reports/experiments/exp5_vs_current_production.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload comparison evidence
