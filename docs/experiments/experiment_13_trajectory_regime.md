@@ -2,9 +2,11 @@
 
 ## Status
 
-**EXPERIMENTAL / PENDING EVIDENCE**
+**V2 EXPERIMENTAL / PENDING CONTROLLED EVIDENCE**
 
-This PR installs Experiment 13 as the active challenger. It does **not** promote or modify production.
+Experiment 13 v1 executed successfully but did not produce a reproducible improvement over production. It is retained in the branch for reproducibility, while the active adapter now points to the redesigned v2 implementation.
+
+This PR remains experiment-only. It does **not** modify or promote production.
 
 Current production remains:
 
@@ -12,159 +14,156 @@ Current production remains:
 - delay: existing production lifecycle delay model;
 - risk: existing production lifecycle risk model.
 
-## Hypothesis
+## Why v1 was redesigned
 
-Experiment 12 proved that past-only monthly trajectory information can improve cost-overrun forecasting. Experiment 13 tests the next question:
+V1 mostly recombined information already available to the promoted Experiment 12 representation. Its hand-designed pressure scores and explicit interactions added complexity but little genuinely new information, and the final future holdouts showed no stable gain.
 
-> Does the meaning of a trajectory signal change depending on the project's current deterioration/recovery state, lifecycle stage, cross-signal context, recent turning points and regime transitions?
+The v1 controlled result was therefore treated as negative evidence rather than promoted.
 
-The experiment keeps the current production model family, temporal split and weighting contract fixed. The changed dimension is the **trajectory representation**.
+V2 directly addresses the three observed failure modes:
 
-## Added signal families
+1. learn trajectory regimes from the training data instead of prescribing them with hand-built pressure formulas;
+2. require candidate features to generalize across multiple rolling historical validation folds rather than one final two-year block;
+3. explicitly prioritize early/mid lifecycle forecasting during challenger fitting and model selection, while keeping the final holdout evaluation project-balanced.
 
-### 1. Continuous project-regime / pressure scores
+## V2 hypothesis
 
-Rather than forcing each project into one brittle hard class, Experiment 13 derives continuous past-only scores for:
+> Latent project states learned from leakage-safe monthly trajectories, combined with past-only structural-change detection and robust multi-fold temporal selection, can capture new information beyond Experiment 12 and improve decision-useful early/mid forecasting without sacrificing future generalization.
 
-- cost pressure;
-- schedule pressure;
-- execution/spend stall pressure;
-- recovery strength;
-- combined cost + schedule pressure;
-- cost-vs-schedule pressure imbalance;
-- revision volatility.
+## 1. Learned latent trajectory regimes
 
-These scores are built from already leakage-safe Experiment 12 history signals such as normalized 3/6/12-month growth, acceleration, revision magnitude and worsening streaks.
+V2 fits a training-only Gaussian-mixture model over leakage-safe Experiment 12 trajectory dimensions including:
 
-### 2. Cross-signal interactions
+- 3/6/12-month cost growth and acceleration;
+- 3/6/12-month expenditure velocity and acceleration;
+- 3/6/12-month schedule-slippage velocity and acceleration;
+- spend-vs-expected-progress gap;
+- cost/schedule revision magnitude;
+- cost/schedule worsening streaks.
 
-Experiment 13 explicitly represents compound deterioration, including:
+The regime model is unsupervised: it does not receive final cost-overrun or final delay targets.
 
-- cost pressure × schedule pressure;
-- cost pressure × execution stall;
-- schedule pressure × execution stall;
-- cost acceleration × schedule acceleration;
-- cost worsening streak × schedule worsening streak.
+It produces soft state information rather than a single brittle label:
 
-Tree models can discover interactions implicitly, but this experiment tests whether a small, domain-motivated interaction set improves temporal generalization without changing model family.
+- probability of each learned regime;
+- most likely regime;
+- regime confidence;
+- regime entropy;
+- regime surprise / negative log likelihood.
 
-### 3. Lifecycle-conditioned trajectory interactions
+Every rolling validation fold fits its own regime encoder using only that fold's fitting years. The final encoder is fit only on the full training window. Future holdout projects are transformed with the frozen encoder and never participate in regime learning.
 
-The same trajectory may have different meaning early versus late in project execution. Experiment 13 therefore adds:
+## 2. Past-only structural-change detection
 
-- cost pressure × lifecycle progress;
-- schedule pressure × lifecycle progress;
-- combined pressure × lifecycle progress;
-- cost growth × lifecycle progress;
-- schedule acceleration × lifecycle progress;
-- spend-vs-expected-progress gap × lifecycle progress.
+V2 replaces short-vs-long heuristic turning proxies with an online two-sided CUSUM detector for:
 
-No future completion outcome is used to create these features.
+- cost trajectory;
+- schedule-slippage trajectory;
+- expenditure trajectory.
 
-### 4. Turning-point / structural-change signals
+At report `t`, the CUSUM baseline is calculated only from earlier reports for the same canonical project. The detector records:
 
-Experiment 13 compares short-horizon and long-horizon trajectory behavior to detect recent changes in direction or intensity:
+- current change score;
+- structural-change event indicator;
+- reports since the most recent detected change;
+- synchronized cost/schedule/spend change intensity.
 
-- 3-month vs 12-month cost-growth divergence;
-- 3-month vs 12-month schedule-slippage divergence;
-- 3-month vs 12-month spend-velocity divergence;
-- cost, schedule and spend turning strength;
-- synchronized cost + schedule turning strength.
+Appending a future report must not alter an earlier feature vector; tests enforce this as-of property.
 
-These are deterministic as-of features; they do not use the final holdout to learn change-point thresholds.
+## 3. Multi-fold temporal model selection
 
-### 5. Regime-transition signals
+V1 selected a feature group using only the final internal validation block, allowing a small local gain to be mistaken for a stable temporal effect.
 
-Experiment 13 also models how pressure itself is changing:
+V2 uses up to three rolling forward-only folds inside the training period. Each fold obeys:
 
-- 3-month cost-pressure velocity;
-- 3-month schedule-pressure velocity;
-- 3-month compound-pressure velocity;
-- worsening-transition strength;
-- recovery-transition strength;
-- consecutive worsening-regime streak.
+`fit years < validation years < untouched final holdout`
 
-This distinguishes a project that has been consistently problematic from one that has only recently started deteriorating rapidly.
+Candidate groups are:
 
-## Target-specific ablation
+1. `stage_weighted_production`
+2. `learned_regimes`
+3. `learned_regimes_plus_change_points`
 
-Experiment 13 does not force all new features into either target.
+A learned-regime group is accepted only if it satisfies all of the following relative to the stage-weighted production-feature challenger:
 
-For **cost** and **delay separately**, it evaluates these feature depths on an internal temporal validation block inside the training window:
+- at least **0.25% mean improvement** in the stage-priority selection objective;
+- wins at least two folds, or all-but-one when fewer folds are available;
+- no validation fold worse than **-1.5%**.
 
-1. `production_only`
-2. `regime_scores`
-3. `regime_plus_interactions`
-4. `regime_interactions_turning`
-5. `all_regime_context`
+If those conditions are not met, v2 falls back to the stage-weighted production feature set instead of accepting a one-window improvement.
 
-The lowest-MAE group is selected before fitting on the full training window.
+## 4. Early/mid lifecycle optimization
 
-The future holdout is never used to select the feature group.
+Production evaluation remains project-balanced so headline numbers are directly comparable.
 
-This also means Experiment 13 can legitimately select `production_only` for one target if its new context does not validate.
+Challenger training, however, deliberately gives more importance to stages where an intervention is still useful:
+
+- early: 2.5x training multiplier;
+- early-mid / mid: 2.1x;
+- late-mid / late: 1.25x;
+- very-late: 0.70x.
+
+The temporal selection objective combines overall project-balanced MAE with a lifecycle-priority MAE that weights early and mid stages more strongly. This prevents thousands of very-late snapshots from hiding a deterioration in early-warning performance.
+
+Both ordinary overall MAE and stage-level/stage-balanced MAE remain reported on the untouched future cohort.
 
 ## Fair comparison against promoted Experiment 12 production
 
-Experiment 13 starts from the exact promoted production feature contract:
+The current production model remains frozen.
 
-- the production cost model receives its existing Experiment 12-selected trajectory features;
-- the production delay model receives its current production delay features;
-- Experiment 13 adds only its new regime/context representation on top;
-- the production-selected regressor family is retained for each target;
-- the production/challenger comparison uses the same frozen dataset, temporal split and comparable project cohort.
+Experiment 13 v2:
 
-This prevents an apparent Experiment 13 gain from actually being caused by silently reverting or changing Experiment 12.
+- starts from the exact promoted Experiment 12 production feature contract;
+- retains the production-selected regressor family for cost and delay;
+- adds learned-regime/change-point context only inside the challenger;
+- uses the same temporal project split and comparable future cohort;
+- evaluates production and challenger with the same project-balanced holdout weights;
+- writes only namespaced experiment artifacts;
+- has `promotion_allowed: false`.
 
 ## Leakage policy
 
-For snapshot `t`, every Experiment 13 feature is derived only from:
+For every snapshot, raw trajectory and change-point signals use only current/earlier official reports for that canonical project.
 
-- the current official snapshot;
-- earlier official snapshots for the same canonical project.
+For learned regimes:
 
-Appending an extreme future report must not alter an earlier Experiment 13 feature vector. Tests enforce this property.
-
-Feature-group selection uses only an internal historical block within the requested training window. Holdout outcomes are untouched until final evaluation/reveal.
+- each internal fold fits its imputer, scaler and Gaussian mixture only on that fold's fitting period;
+- validation rows are transformed by the frozen fold encoder;
+- the final regime encoder is fit only on the full requested training window;
+- final future holdout rows never affect regime discovery, feature selection or model fitting.
 
 ## Evaluation contract
 
-The experiment should be audited on at least both standard windows:
+Run both standard controlled windows:
 
-- training: 2001–2019, future holdout through the latest valid completion year;
-- training: 2001–2021, future holdout through the latest valid completion year.
+- training 2001–2019, future holdout through the latest valid completion year;
+- training 2001–2021, future holdout through the latest valid completion year.
 
-Report independently for cost and delay:
+For cost and delay independently report:
 
 - production MAE;
-- Experiment 13 MAE;
-- absolute MAE reduction;
-- relative improvement percentage;
+- Experiment 13 v2 MAE;
+- absolute and percentage MAE improvement;
 - paired-project bootstrap probability candidate is better;
 - paired-project 95% improvement interval;
 - lifecycle-stage MAE;
 - stage-balanced MAE;
 - comparable project/snapshot counts;
-- selected internal feature group.
+- rolling-fold selection diagnostics;
+- selected v2 feature group.
 
-A green workflow means only that the experiment executed successfully. It does **not** mean the model improved.
+A green workflow means technical success only. Promotion requires reproducibly positive scientific evidence.
+
+## Neural-network follow-up
+
+A neural sequence model is intentionally **not** mixed into this PR. Doing so would simultaneously change trajectory representation, validation policy, weighting and model family, making attribution impossible.
+
+If v2 still fails to improve, a separate controlled neural challenger may be justified only if it consumes the raw ordered monthly sequence (for example a compact GRU/TCN/Transformer-style encoder with static project covariates), rather than an MLP over the same engineered tabular features.
+
+That neural experiment must compare against the same promoted production baseline and use the same future holdout contract.
 
 ## Promotion rule
 
 There is no automatic promotion.
 
-Cost and delay are judged independently. A strong cost result does not justify promoting a regressed delay model, and vice versa.
-
-Promotion should require a separate deliberate PR after the result is reproducibly positive across the required temporal windows and provenance checks.
-
-## Retrain & Compare integration
-
-`backend/app/ml/experiments/adapter_exp13.py` registers:
-
-- `EXPERIMENT_ID = exp_13`
-- sequence: `13`
-- scope: `cost_delay`
-
-The generic Model Simulation workflow will therefore use Experiment 13 as the active challenger while this adapter is installed.
-
-Experiment artifacts remain isolated under the generic experiment artifact namespace and have `promotion_allowed: false`.
+Cost and delay are judged independently. A gain on one target does not justify promoting a regression on the other. Any accepted component requires positive results on both required temporal windows and a separate deliberate production PR.
