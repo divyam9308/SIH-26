@@ -1,0 +1,69 @@
+name: Experiment 23 geographic priors comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/geographic_priors_exp23.py'
+      - 'backend/app/ml/experiments/adapter_exp23.py'
+      - 'tests/test_exp23_geographic_priors.py'
+      - '.github/workflows/exp23-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - start: 2001
+            end: 2019
+          - start: 2001
+            end: 2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run Experiment 23 tests
+        run: PYTHONPATH=. pytest -q tests/test_exp23_geographic_priors.py
+      - name: Run production vs Experiment 23
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python scripts/run_ml_experiment.py \
+            --callable backend.app.ml.experiments.adapter_exp23:run_experiment \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --test-end 2025
+      - name: Print scientific verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start='${{ matrix.start }}'; end='${{ matrix.end }}'
+          r=json.loads((Path('reports/experiments/exp_23')/f'{start}_{end}'/'result.json').read_text())
+          m=r['metrics']; c=r['coverage']
+          print(f'WINDOW={start}_{end}')
+          print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
+          print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']:.6f}")
+          print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
+          print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']:.6f}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"TEST_STATE_SHARE={c['test_snapshot_state_share']:.6f}")
+          print(f"COST_CORRECTION_SHARE={c['cost_nonzero_correction_share']:.6f}")
+          print(f"DELAY_CORRECTION_SHARE={c['delay_nonzero_correction_share']:.6f}")
+          print(f"VERDICT={r['decision']}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp23-${{ matrix.start }}-${{ matrix.end }}
+          path: reports/experiments/exp_23/${{ matrix.start }}_${{ matrix.end }}/**
+          if-no-files-found: warn
