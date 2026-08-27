@@ -7,9 +7,14 @@ from backend.app.ml.experiments.scope_semantics_exp21 import (
     EXPERIMENT_SCOPE,
     run_experiment,
 )
+from backend.app.ml.experiments.runtime_exp21 import (
+    filter_comparable_rows,
+    fit_experiment,
+    predict_project,
+)
 
 EXPERIMENT_SEQUENCE = 21
 
 
-def fit_against_production(*, training_start: int, training_end: int, test_end: int, **_: object) -> dict:
-    return run_experiment(training_start, training_end, test_end)
+def fit_against_production(**kwargs):
+    return fit_experiment(**kwargs)
