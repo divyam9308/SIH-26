@@ -1,7 +1,7 @@
-"""Retrain & Compare adapter for Experiment 13."""
+"""Retrain & Compare adapter for Experiment 13 v2."""
 from __future__ import annotations
 
-from backend.app.ml.experiments.trajectory_exp13 import (
+from backend.app.ml.experiments.trajectory_exp13_v2 import (
     EXPERIMENT_ID,
     EXPERIMENT_NAME,
     EXPERIMENT_SCOPE,
@@ -15,8 +15,8 @@ from backend.app.ml.production_cost_baseline import enrich_supervised_for_produc
 
 def fit_against_production(**kwargs):
     # Production cost already uses the promoted Exp12 trajectory representation.
-    # Exp13 must start from that exact evidence contract, then add only its new
-    # regime/context features on top. This adapter remains experiment-only.
+    # Exp13 v2 keeps that production contract frozen, then learns latent trajectory
+    # regimes and change-point context strictly inside the experiment pipeline.
     enriched = dict(kwargs)
     enriched["data"] = enrich_supervised_for_production(kwargs["data"].copy())
     return fit_experiment(**enriched)
