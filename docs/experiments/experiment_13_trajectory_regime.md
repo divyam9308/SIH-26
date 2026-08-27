@@ -158,9 +158,11 @@ A green workflow means technical success only. Promotion requires reproducibly p
 
 A neural sequence model is intentionally **not** mixed into this PR. Doing so would simultaneously change trajectory representation, validation policy, weighting and model family, making attribution impossible.
 
-If v2 still fails to improve, a separate controlled neural challenger may be justified only if it consumes the raw ordered monthly sequence (for example a compact GRU/TCN/Transformer-style encoder with static project covariates), rather than an MLP over the same engineered tabular features.
+A neural follow-up is worth testing only as a separate controlled challenger that consumes the raw ordered monthly history instead of the same engineered tabular vector. Suitable compact candidates are a GRU, temporal convolutional network, or similarly small sequence encoder with static project covariates. A large Transformer should not be the first neural attempt because the available project count is modest relative to typical deep-learning data requirements.
 
-That neural experiment must compare against the same promoted production baseline and use the same future holdout contract.
+The neural challenger should be considered after Exp13 v2 results are known. If v2 improves materially, the neural model can test whether raw sequence learning adds further gain. If v2 does not improve, the neural model becomes more interesting because it changes the representation mechanism rather than merely adding more engineered interactions.
+
+That neural experiment must remain isolated from this PR and compare against the same promoted production baseline and future holdout contract.
 
 ## Promotion rule
 
