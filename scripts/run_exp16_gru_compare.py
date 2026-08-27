@@ -24,12 +24,23 @@ from backend.app.ml.monthly_lifecycle import (
     as_of_feature_evidence,
     build_training_dataset,
 )
-from backend.app.ml.monthly_training import _fit_pipeline, _regressors, _select_regressor, temporal_project_split
+from backend.app.ml.monthly_training import (
+    _fit_pipeline,
+    _json_safe,
+    _regressors,
+    _select_regressor,
+    temporal_project_split,
+)
 from backend.app.ml.production_cost_baseline import (
     PRODUCTION_COST_BASELINE,
     PRODUCTION_COST_SEED,
     enrich_supervised_for_production,
 )
+
+
+def _json_ready(value):
+    """Normalize NumPy/Pandas scalars before strict JSON publication."""
+    return _json_safe(value)
 
 
 def reproduce_production(data: pd.DataFrame, start: int, end: int, test_end: int):
@@ -130,15 +141,15 @@ def main() -> int:
         production_bundle=production_bundle,
         production_receipt=production_receipt,
     )
-    payload = {
+    payload = _json_ready({
         "experiment": result["experiment"],
         "overall_comparison": result["overall_comparison"],
         "production_reproduction": reproduction,
         "window": {"training_start": args.start, "training_end": args.end, "testing_end": test_end},
-    }
+    })
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
-    print("EXP16_GRU_COMPARISON=" + json.dumps(payload["overall_comparison"], sort_keys=True))
+    print("EXP16_GRU_COMPARISON=" + json.dumps(payload["overall_comparison"], sort_keys=True, allow_nan=False))
     return 0
 
 
