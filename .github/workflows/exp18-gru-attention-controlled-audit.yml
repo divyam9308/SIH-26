@@ -1,0 +1,55 @@
+name: Experiment 18 GRU attention controlled audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/adapter_exp18.py'
+      - 'backend/app/ml/experiments/neural_sequence_common.py'
+      - 'backend/app/ml/experiments/gru_attention_exp18.py'
+      - 'scripts/run_neural_sequence_compare.py'
+      - 'tests/test_exp18_gru_attention.py'
+      - '.github/workflows/exp18-gru-attention-controlled-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: '2001-2019', start: 2001, end: 2019}
+          - {label: '2001-2021', start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - name: Install project dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate Python sources
+        run: python -m compileall -q backend scripts tests
+      - name: Run focused GRU-attention tests
+        env: {PYTHONPATH: .}
+        run: pytest tests/test_exp18_gru_attention.py tests/test_exp12_trajectory.py -q
+      - name: Run controlled GRU-attention temporal comparison
+        env: {PYTHONPATH: .}
+        run: |
+          mkdir -p reports/experiments
+          python scripts/run_neural_sequence_compare.py \
+            --experiment-id exp_18 \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --output reports/experiments/exp18_gru_attention_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Upload GRU-attention evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp18-gru-attention-audit-${{ matrix.label }}
+          path: |
+            reports/experiments/exp18_gru_attention_${{ matrix.start }}_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_18/**
+          if-no-files-found: warn
