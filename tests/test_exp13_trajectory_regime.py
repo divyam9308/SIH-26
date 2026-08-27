@@ -52,7 +52,8 @@ def _history() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_exp13_history_features_are_as_of_safe_when_future_reports_are_added():
+def test_exp13_v1_history_features_are_as_of_safe_when_future_reports_are_added():
+    """Keep v1 reproducibility checks even though the active adapter uses v2."""
     history = _history()
     before = engineer_history(history)
     future = history.iloc[-1].copy()
@@ -70,7 +71,7 @@ def test_exp13_history_features_are_as_of_safe_when_future_reports_are_added():
     pd.testing.assert_frame_equal(before_rows[columns], after_rows[columns])
 
 
-def test_exp13_enrichment_preserves_cohort_and_adds_lifecycle_interactions():
+def test_exp13_v1_enrichment_preserves_cohort_for_reproducibility():
     history = _history()
     supervised = history.iloc[[3, 7]].copy()
     supervised["completion_year"] = [2023, 2023]
@@ -87,7 +88,7 @@ def test_exp13_enrichment_preserves_cohort_and_adds_lifecycle_interactions():
     assert enriched[LIFECYCLE_FEATURES].notna().any(axis=1).all()
 
 
-def test_exp13_candidate_groups_include_safe_production_fallback():
+def test_exp13_v1_candidate_groups_retain_historical_fallback():
     groups = _candidate_groups(EXP13_FEATURES)
     assert groups["production_only"] == []
     assert set(REGIME_FEATURES).issubset(groups["regime_scores"])
