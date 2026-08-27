@@ -1,4 +1,4 @@
-"""Retrain & Compare adapter for Experiment 13 v2."""
+"""Retrain & Compare adapter for Experiment 13 v2 learned regimes."""
 from __future__ import annotations
 
 from backend.app.ml.experiments.trajectory_exp13_v2 import (
