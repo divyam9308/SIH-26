@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,6 +17,7 @@ from backend.app.ml.experiments.gru_sequence_exp16 import (
     SequenceStore,
     _rolling_folds,
 )
+from scripts.run_exp16_gru_compare import _json_ready
 
 
 def _history(months: int = 72) -> pd.DataFrame:
@@ -78,6 +81,17 @@ def test_gru_forward_supports_variable_length_sequences():
     cats = torch.zeros((2, 3), dtype=torch.long)
     out = model(sequence, lengths, numeric, cats)
     assert tuple(out.shape) == (2, 2)
+
+
+def test_audit_json_normalizes_numpy_scalars_and_nonfinite_values():
+    payload = {
+        "year": np.int64(2019),
+        "score": np.float64(1.25),
+        "nested": [{"count": np.int32(3), "missing": np.float64(np.nan)}],
+    }
+    normalized = _json_ready(payload)
+    assert normalized == {"year": 2019, "score": 1.25, "nested": [{"count": 3, "missing": None}]}
+    json.dumps(normalized, allow_nan=False)
 
 
 def test_exp16_adapter_is_registered_as_default_challenger():
