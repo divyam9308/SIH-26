@@ -1,0 +1,69 @@
+name: Experiment 7 hierarchical residual comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/hierarchical_residual_priors_exp7.py'
+      - '.github/workflows/exp7-compare.yml'
+      - 'backend/app/ml/production_cost_baseline.py'
+      - 'backend/app/ml/monthly_lifecycle.py'
+      - 'backend/app/ml/monthly_training.py'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - training_start: 2001
+            training_end: 2019
+            test_end: 2024
+            window: 2001_2019
+          - training_start: 2001
+            training_end: 2021
+            test_end: 2024
+            window: 2001_2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Validate sources
+        run: python -m compileall -q backend scripts tests
+      - name: Run Experiment 7
+        run: |
+          python scripts/run_ml_experiment.py \
+            --callable backend.app.ml.experiments.hierarchical_residual_priors_exp7:run_experiment \
+            --start ${{ matrix.training_start }} \
+            --end ${{ matrix.training_end }} \
+            --test-end ${{ matrix.test_end }}
+      - name: Print comparison
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('reports/experiments/exp_7/${{ matrix.window }}/result.json')
+          r = json.loads(p.read_text())
+          m = r['metrics']
+          print('WINDOW=${{ matrix.window }}')
+          print(f"BASELINE_COST_MAE={m['baseline_cost_mae']:.8f}")
+          print(f"EXP7_COST_MAE={m['experiment_cost_mae']:.8f}")
+          print(f"IMPROVEMENT_PERCENT={m['improvement_percentage']:.6f}")
+          print(f"DECISION={r['decision']}")
+          print(f"COST_FEATURE_COUNT={r['cost_feature_count']}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp7-results-${{ matrix.window }}
+          path: |
+            reports/experiments/exp_7/${{ matrix.window }}/**
+            reports/experiments/registry_entries/exp_7/**
+          if-no-files-found: warn
