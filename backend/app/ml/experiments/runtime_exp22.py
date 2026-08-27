@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 
 from backend.app.ml.experiments.milestone_trajectory_exp22 import (
-    EXPERIMENT_ID, EXPERIMENT_NAME, EXPERIMENT_SCOPE, MILESTONE_FEATURES, add_milestone_features,
+    EXPERIMENT_ID,
+    EXPERIMENT_NAME,
+    EXPERIMENT_SCOPE,
+    MILESTONE_FEATURES,
+    enrich_with_monthly_milestones,
 )
 from backend.app.ml.monthly_training import _fit_pipeline, _regression_metrics, _regressors, temporal_project_split
 from backend.app.ml.production_cost_baseline import PRODUCTION_COST_SEED, enrich_supervised_for_production, target_feature_contract
@@ -21,7 +25,7 @@ def _gain(base: float, candidate: float) -> float:
 
 
 def fit_experiment(*, data, training_start, training_end, test_end, production_bundle, production_receipt, **_):
-    enriched = add_milestone_features(enrich_supervised_for_production(data.copy()))
+    enriched = enrich_with_monthly_milestones(enrich_supervised_for_production(data.copy()))
     enriched["completion_year"] = pd.to_numeric(enriched.completion_year, errors="coerce")
     train, test = temporal_project_split(enriched, training_start, training_end, test_end)
     metadata = production_bundle.get("metadata") or {}
@@ -63,6 +67,7 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
             "comparison_test_projects": int(test.canonical_project_id.nunique()), "comparison_test_snapshots": int(len(test)),
             "training_milestone_snapshot_share": float(train.exp22_milestone_ratio.notna().mean()),
             "test_milestone_snapshot_share": float(test.exp22_milestone_ratio.notna().mean()),
+            "feature_history_granularity": "full official monthly history",
         },
         "runtime_state": {
             "cost_model": cost_model, "delay_model": delay_model,
