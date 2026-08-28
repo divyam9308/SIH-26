@@ -1,0 +1,70 @@
+name: Experiment 27 comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/remaining_delay_exp27.py'
+      - 'backend/app/ml/experiments/adapter_exp27.py'
+      - 'scripts/run_fast_current_experiment.py'
+      - 'tests/test_exp27_remaining_delay.py'
+      - '.github/workflows/exp27-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - start: 2001
+            end: 2019
+          - start: 2001
+            end: 2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run Experiment 27 unit tests
+        run: PYTHONPATH=. pytest -q tests/test_exp27_remaining_delay.py
+      - name: Compare exact current production vs Experiment 27
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python scripts/run_fast_current_experiment.py \
+            --experiment exp_27 \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --test-end 2025 \
+            --output audit_outputs/exp27_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Print scientific verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start='${{ matrix.start }}'; end='${{ matrix.end }}'
+          r=json.loads((Path('audit_outputs')/f'exp27_{start}_{end}.json').read_text())
+          m=r['overall_comparison']
+          print(f'WINDOW={start}_{end}')
+          print(f"PRODUCTION_COST_MAE={m.get('production_cost_mae')}")
+          print(f"EXPERIMENT_COST_MAE={m.get('experiment_cost_mae')}")
+          print(f"COST_IMPROVEMENT_PERCENT={m.get('cost_improvement_percentage')}")
+          print(f"PRODUCTION_DELAY_MAE={m.get('production_delay_mae')}")
+          print(f"EXPERIMENT_DELAY_MAE={m.get('experiment_delay_mae')}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m.get('delay_improvement_percentage')}")
+          print(f"COMPARISON_PROJECTS={m.get('comparison_test_projects')}")
+          print(f"COMPARISON_SNAPSHOTS={m.get('comparison_test_snapshots')}")
+          print(f"VERDICT={m.get('decision')}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp27-${{ matrix.start }}-${{ matrix.end }}
+          path: audit_outputs/exp27_${{ matrix.start }}_${{ matrix.end }}.json
+          if-no-files-found: warn
