@@ -1,0 +1,75 @@
+name: Experiment 26 MAE-native comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/mae_native_exp26.py'
+      - 'backend/app/ml/experiments/adapter_exp26.py'
+      - 'scripts/run_fast_current_experiment.py'
+      - 'tests/test_exp26_mae_native.py'
+      - '.github/workflows/exp26-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - start: 2001
+            end: 2019
+          - start: 2001
+            end: 2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run Experiment 26 unit tests
+        run: PYTHONPATH=. pytest -q tests/test_exp26_mae_native.py
+      - name: Compare exact current production vs Experiment 26
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python scripts/run_fast_current_experiment.py \
+            --experiment exp_26 \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --test-end 2025 \
+            --output audit_outputs/exp26_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Print scientific verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start='${{ matrix.start }}'; end='${{ matrix.end }}'
+          r=json.loads((Path('audit_outputs')/f'exp26_{start}_{end}.json').read_text())
+          m=r['overall_comparison']
+          print(f'WINDOW={start}_{end}')
+          print(f"COMPARISON_FILTER={m.get('comparison_filter')}")
+          print(f"COMPARISON_PROJECTS={m['comparison_test_projects']}")
+          print(f"COMPARISON_SNAPSHOTS={m['comparison_test_snapshots']}")
+          print(f"COST_ALGORITHM={m.get('cost_algorithm_family')}")
+          print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
+          print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']:.6f}")
+          print(f"COST_VERDICT={m.get('cost_target_verdict')}")
+          print(f"DELAY_ALGORITHM={m.get('delay_algorithm_family')}")
+          print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
+          print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']:.6f}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"DELAY_VERDICT={m.get('delay_target_verdict')}")
+          print(f"VERDICT={m['decision']}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp26-${{ matrix.start }}-${{ matrix.end }}
+          path: audit_outputs/exp26_${{ matrix.start }}_${{ matrix.end }}.json
+          if-no-files-found: warn
