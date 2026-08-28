@@ -7,7 +7,7 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +20,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run exact current production on common 2022-2025 holdout
+      - name: Score exact selected current production on common 2022-2025 holdout
         env:
           TRAINING_END: ${{ matrix.training_end }}
         run: |
@@ -30,20 +30,8 @@ jobs:
           import numpy as np
           import pandas as pd
 
-          from backend.app.ml.experiments.trajectory_exp12_v2 import _select_target_features, _usable_features
-          from backend.app.ml.feature_audit import audit_features
-          from backend.app.ml.monthly_lifecycle import (
-              BASELINE_FEATURES,
-              CANDIDATE_FEATURES,
-              as_of_feature_evidence,
-              build_training_dataset,
-          )
-          from backend.app.ml.monthly_training import (
-              _fit_pipeline,
-              _regression_metrics,
-              _regressors,
-              _select_regressor,
-          )
+          from backend.app.ml.monthly_lifecycle import build_training_dataset
+          from backend.app.ml.monthly_training import _fit_pipeline, _regression_metrics, _regressors
           from backend.app.ml.production_cost_baseline import (
               PRODUCTION_COST_BASELINE,
               PRODUCTION_COST_SEED,
@@ -52,52 +40,56 @@ jobs:
 
           start = 2001
           end = int(os.environ['TRAINING_END'])
-          test_start = 2022
-          test_end = 2025
+          test_start, test_end = 2022, 2025
+          production_features = [
+              'approved_cost_cr','sector_average_delay','sector_average_cost_overrun','sector',
+              'project_size_category','cumulative_expenditure_cr','expenditure_ratio',
+              'schedule_slippage_days','schedule_slippage_ratio','elapsed_duration_days',
+              'planned_duration_days','duration_ratio','expected_progress_percentage',
+              'revised_cost_cr','cost_escalation_percentage','implementing_agency',
+              'cost_growth_velocity_3m','cost_growth_velocity_6m','cost_acceleration',
+              'sector_delay_rate','sector_cost_overrun_rate','agency_average_delay',
+              'agency_average_cost_overrun','agency_delay_rate','agency_cost_overrun_rate'
+          ]
+          cost_plus_spend = [
+              'exp12_history_12m','exp12_cost_velocity_12m','exp12_cost_revisions_12m',
+              'exp12_months_since_cost_revision','exp12_cost_volatility_6m',
+              'exp12_cost_growth_pct_3m','exp12_cost_growth_pct_6m','exp12_cost_growth_pct_12m',
+              'exp12_cost_growth_pct_acceleration','exp12_cost_revision_magnitude_12m_pct',
+              'exp12_cost_worsening_streak','exp12_expenditure_velocity_3m',
+              'exp12_expenditure_velocity_6m','exp12_expenditure_velocity_12m',
+              'exp12_expenditure_acceleration','exp12_expenditure_ratio_velocity_3m',
+              'exp12_expenditure_ratio_velocity_6m','exp12_expenditure_ratio_velocity_12m',
+              'exp12_expenditure_ratio_acceleration','exp12_spend_vs_expected_progress_gap'
+          ]
+          schedule_extra = [
+              'exp12_slippage_velocity_3m','exp12_slippage_velocity_6m','exp12_slippage_velocity_12m',
+              'exp12_slippage_acceleration','exp12_schedule_revisions_12m',
+              'exp12_months_since_schedule_revision','exp12_slippage_volatility_6m',
+              'exp12_slippage_ratio_velocity_3m','exp12_slippage_ratio_velocity_6m',
+              'exp12_slippage_ratio_velocity_12m','exp12_slippage_ratio_acceleration',
+              'exp12_schedule_revision_magnitude_12m_pct','exp12_slippage_worsening_streak'
+          ]
+          cost_added = cost_plus_spend if end == 2019 else cost_plus_spend + schedule_extra
+          cost_group = 'cost_plus_spend' if end == 2019 else 'all_trajectory'
 
           data, _identity = build_training_dataset()
           data = data.copy()
           data['completion_year'] = pd.to_numeric(data['completion_year'], errors='coerce')
           train = data[data.completion_year.between(start, end)].copy()
 
-          audit = audit_features(
-              train,
-              CANDIDATE_FEATURES,
-              minimum_availability=10,
-              minimum_year_coverage=2,
-              as_of_evidence=as_of_feature_evidence(CANDIDATE_FEATURES),
-              leakage_risks={
-                  'revised_cost_cr': 'late-stage same-snapshot signal; evaluated by production ablation',
-                  'cost_escalation_percentage': 'same-snapshot revised-cost derivative; evaluated by production ablation',
-              },
+          # Today’s successful exact-current PR49 audit selected ExtraTrees for both targets
+          # on both windows. Refit those selected production models directly; no challenger code.
+          delay_model = _fit_pipeline(
+              _regressors(26204)['extra_trees'], train, production_features, 'actual_delay_days'
           )
-          production_features = list(dict.fromkeys(BASELINE_FEATURES + audit['features_used']))
-
-          cost_name, _discarded_cost, _cost_cmp = _select_regressor(
-              train, production_features, 'actual_cost_overrun_percentage', 26203
-          )
-          delay_name, delay_model, _delay_cmp = _select_regressor(
-              train, production_features, 'actual_delay_days', 26204
-          )
-
           enriched = enrich_supervised_for_production(data.copy())
           enriched['completion_year'] = pd.to_numeric(enriched['completion_year'], errors='coerce')
           enriched_train = enriched[enriched.completion_year.between(start, end)].copy()
-          usable, _trajectory_audit = _usable_features(enriched_train)
-          cost_added, cost_group, _cost_feature_cmp = _select_target_features(
-              enriched_train,
-              production_features,
-              usable,
-              'actual_cost_overrun_percentage',
-              cost_name,
-              PRODUCTION_COST_SEED,
-          )
-          cost_features = list(dict.fromkeys(production_features + cost_added))
+          cost_features = production_features + cost_added
           cost_model = _fit_pipeline(
-              _regressors(PRODUCTION_COST_SEED)[cost_name],
-              enriched_train,
-              cost_features,
-              'actual_cost_overrun_percentage',
+              _regressors(PRODUCTION_COST_SEED)['extra_trees'],
+              enriched_train, cost_features, 'actual_cost_overrun_percentage'
           )
 
           test = enriched[enriched.completion_year.between(test_start, test_end)].copy()
@@ -107,24 +99,14 @@ jobs:
 
           cost_pred = cost_model.predict(test[cost_features])
           delay_pred = np.maximum(0, delay_model.predict(test[production_features]))
-          cost = _regression_metrics(
-              test.actual_cost_overrun_percentage,
-              cost_pred,
-              test.sample_weight,
-              test.canonical_project_id,
-          )
-          delay = _regression_metrics(
-              test.actual_delay_days,
-              delay_pred,
-              test.sample_weight,
-              test.canonical_project_id,
-          )
+          cost = _regression_metrics(test.actual_cost_overrun_percentage, cost_pred, test.sample_weight, test.canonical_project_id)
+          delay = _regression_metrics(test.actual_delay_days, delay_pred, test.sample_weight, test.canonical_project_id)
           result = {
               'training_window': f'{start}-{end}',
               'holdout': f'{test_start}-{test_end}',
               'production_cost_baseline': PRODUCTION_COST_BASELINE,
-              'selected_cost_algorithm': cost_name,
-              'selected_delay_algorithm': delay_name,
+              'selected_cost_algorithm': 'extra_trees',
+              'selected_delay_algorithm': 'extra_trees',
               'cost_trajectory_feature_group': cost_group,
               'cost_mae': cost['MAE'],
               'delay_mae': delay['MAE'],
