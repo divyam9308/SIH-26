@@ -27,7 +27,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Promotion contract tests
         run: PYTHONPATH=. pytest -q tests/test_exp34_production_promotion.py tests/test_exp34_path_oof_delay.py
-      - name: Retrain selected production window and verify invariants
+      - name: Retrain selected production window and verify exact 721-project evidence
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -47,21 +47,32 @@ jobs:
           delay_mae_721 = float(result['metrics']['delay_model']['MAE'])
           contract = result['metrics']['metadata']['delay_evaluation_contract']
           assert int(contract['test_projects']) == 721, contract
+          assert int(contract['test_snapshots']) == 11200, contract
           assert int(contract['full_holdout_projects']) == 728, contract
           delay_mae_728 = float(contract['full_holdout_delay_metrics']['MAE'])
 
+          # Exact verified 721-project production contract from audit PR #61.
           assert abs(cost_mae - 26.872) <= 0.001, cost_mae
+          assert abs(delay_mae_721 - 501.303) <= 0.001, delay_mae_721
           assert abs(delay_mae_728 - 503.555) <= 0.001, delay_mae_728
+          verified_previous_production_delay_mae_721 = 534.691
+          improvement = (verified_previous_production_delay_mae_721 - delay_mae_721) / verified_previous_production_delay_mae_721 * 100.0
+          assert improvement > 0
+          assert abs(improvement - 6.2444) <= 0.001, improvement
 
           metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
           weights = metadata['delay_blend_weights']
           assert weights == {'extra_trees': 0.2, 'lightgbm': 0.6, 'xgboost': 0.2}, weights
           assert metadata['cost_evaluation_contract']['test_projects'] == 721
           assert metadata['delay_evaluation_contract']['test_projects'] == 721
+          assert metadata['production_cost_baseline'] == 'exp12_trajectory_v3_cost_only'
+          assert metadata['production_delay_baseline'] == 'exp34_path_oof_ensemble_v1'
 
           print(f'PRODUCTION_COST_MAE_721={cost_mae:.6f}')
-          print(f'PRODUCTION_DELAY_MAE_721={delay_mae_721:.6f}')
-          print(f'PRODUCTION_DELAY_MAE_FULL_728={delay_mae_728:.6f}')
+          print(f'PREVIOUS_PRODUCTION_DELAY_MAE_721={verified_previous_production_delay_mae_721:.6f}')
+          print(f'EXP34_PRODUCTION_DELAY_MAE_721={delay_mae_721:.6f}')
+          print(f'EXP34_DELAY_IMPROVEMENT_721={improvement:.6f}%')
+          print(f'EXP34_PRODUCTION_DELAY_MAE_FULL_728={delay_mae_728:.6f}')
           print(f'EXP34_DELAY_BLEND_WEIGHTS={json.dumps(weights, sort_keys=True)}')
           print('PRODUCTION_EVIDENCE_PROJECTS=721')
           print('EXP34_PRODUCTION_PROMOTION=VERIFIED')
