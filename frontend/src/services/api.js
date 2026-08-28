@@ -4,6 +4,7 @@ const HEAVY_TIMEOUT_MS = 30 * 60 * 1000;
 const COMPARE_TIMEOUT_MS = 60 * 60 * 1000;
 const SELECTED_MODEL_KEY = 'selected_validation_model';
 const ACTIVE_LIFECYCLE_KEY = 'active_lifecycle_run';
+const DEFAULT_PRODUCTION_LIFECYCLE_WINDOW = '2001_2021';
 
 async function request(path, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -65,8 +66,8 @@ export const api = {
   modelImportance: () => request('/api/models/importance'),
   lifecycleRuns: () => request('/api/models/lifecycle-runs'),
   monthlyLifecycleComparison: () => request('/api/models/monthly-lifecycle-comparison'),
-  lifecycleForecast: (code, window = '2015_2021') => request(`/api/projects/${encodeURIComponent(code)}/lifecycle-forecast?window=${encodeURIComponent(window)}`),
-  lifecycleEvolution: (projectId, window = '2015_2021') => request(`/api/models/monthly-lifecycle-evolution/${encodeURIComponent(projectId)}?window=${encodeURIComponent(window)}`),
+  lifecycleForecast: (code, window = DEFAULT_PRODUCTION_LIFECYCLE_WINDOW) => request(`/api/projects/${encodeURIComponent(code)}/lifecycle-forecast?window=${encodeURIComponent(window)}`),
+  lifecycleEvolution: (projectId, window = DEFAULT_PRODUCTION_LIFECYCLE_WINDOW) => request(`/api/models/monthly-lifecycle-evolution/${encodeURIComponent(projectId)}?window=${encodeURIComponent(window)}`),
   validationReport: (modelVersion = selectedModel()) => request(withModel('/api/models/validation', modelVersion)),
   predictionValidation: (limit = 100, modelVersion = selectedModel()) => request(withModel(`/api/models/prediction-validation?limit=${limit}`, modelVersion)),
   rollingValidation: (modelVersion = selectedModel()) => request(withModel('/api/models/rolling-validation', modelVersion)),
