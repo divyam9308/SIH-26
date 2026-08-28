@@ -1,0 +1,84 @@
+name: Experiment 25 delay milestone comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/milestone_delay_exp25.py'
+      - 'backend/app/ml/experiments/runtime_exp25.py'
+      - 'backend/app/ml/experiments/adapter_exp25.py'
+      - 'scripts/run_fast_current_experiment.py'
+      - 'tests/test_exp25_milestone_delay.py'
+      - '.github/workflows/exp25-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - start: 2001
+            end: 2019
+          - start: 2001
+            end: 2021
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Verify updated PAIMANA dataset contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('data/processed/paimana_monthly_ingestion_audit.json').read_text())
+          assert a['monthly_observations'] == 195934
+          assert a['unique_reported_project_codes'] == 4499
+          assert a['reports_failed_parsing'] == 0
+          print('DATASET_OBSERVATIONS=', a['monthly_observations'])
+          print('DATASET_PROJECT_CODES=', a['unique_reported_project_codes'])
+          PY
+      - name: Run Experiment 25 tests
+        run: PYTHONPATH=. pytest -q tests/test_exp25_milestone_delay.py
+      - name: Run exact current production vs Experiment 25
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python scripts/run_fast_current_experiment.py \
+            --experiment exp_25 \
+            --start ${{ matrix.start }} \
+            --end ${{ matrix.end }} \
+            --test-end 2025 \
+            --output audit_outputs/exp25_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Print scientific verdict
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start='${{ matrix.start }}'; end='${{ matrix.end }}'
+          r=json.loads((Path('audit_outputs')/f'exp25_{start}_{end}.json').read_text())
+          m=r['overall_comparison']
+          print(f'WINDOW={start}_{end}')
+          print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
+          print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']:.6f}")
+          print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
+          print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']:.6f}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"TRAIN_MILESTONE_SHARE={m.get('training_milestone_snapshot_share')}")
+          print(f"TEST_MILESTONE_SHARE={m.get('test_milestone_snapshot_share')}")
+          verdict='PROMOTION CANDIDATE' if m['cost_improvement_percentage'] >= 0 and m['delay_improvement_percentage'] > 0 else 'REGRESSION / DO NOT PROMOTE'
+          print(f'VERDICT={verdict}')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp25-${{ matrix.start }}-${{ matrix.end }}
+          path: audit_outputs/exp25_${{ matrix.start }}_${{ matrix.end }}.json
+          if-no-files-found: warn
