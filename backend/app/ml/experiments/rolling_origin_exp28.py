@@ -1,9 +1,12 @@
 """Experiment 28: rolling-origin robust model selection.
 
-Current production chooses a regressor from one final validation year. This
-challenger keeps the same candidate model families, hyperparameters, feature
-contracts, targets and weights, but chooses the family using several historical
-forward-origin validation years. The untouched future holdout is never consulted.
+Current production chooses a regressor from one final validation year on the
+base lifecycle feature set, then the promoted Exp12 Cost path adds its selected
+trajectory features. Exp28 changes only the family-selection policy: it keeps
+that same selection feature set/candidate families/hyperparameters/targets and
+uses several historical forward-origin validation years. The final selected
+Cost family is then fit on the unchanged promoted Exp12 Cost feature contract.
+The untouched future holdout is never consulted for selection.
 """
 from __future__ import annotations
 
@@ -83,15 +86,22 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
     enriched["completion_year"] = pd.to_numeric(enriched.completion_year, errors="coerce")
     enriched["snapshot_date"] = pd.to_datetime(enriched.snapshot_date, errors="coerce")
     train, test = temporal_project_split(enriched, training_start, training_end, test_end)
-    contract = target_feature_contract(dict(production_bundle.get("metadata") or {}))
+    metadata = dict(production_bundle.get("metadata") or {})
+    contract = target_feature_contract(metadata)
     cost_features = list(contract["cost"])
     delay_features = list(contract["delay"])
 
+    # Match the production family-selection stage exactly: Cost/Delay algorithm
+    # families are selected on the base lifecycle features. Only after the Cost
+    # family is selected do we fit it on the promoted Exp12 Cost feature set.
+    selection_features = list(metadata.get("features_used") or delay_features)
+    if not selection_features:
+        raise ValueError("Experiment 28 requires the production family-selection feature contract.")
     cost_name, cost_selection = _robust_select(
-        train, cost_features, "actual_cost_overrun_percentage", PRODUCTION_COST_SEED
+        train, selection_features, "actual_cost_overrun_percentage", PRODUCTION_COST_SEED
     )
     delay_name, delay_selection = _robust_select(
-        train, delay_features, "actual_delay_days", DELAY_SEED
+        train, selection_features, "actual_delay_days", DELAY_SEED
     )
     cost_model = _fit_pipeline(
         _regressors(PRODUCTION_COST_SEED)[cost_name],
@@ -139,6 +149,8 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
             "model_role": "experiment",
             "promotion_allowed": False,
             "changed_dimension": "training_only_model_selection_policy",
+            "selection_feature_contract": selection_features,
+            "final_cost_feature_contract": cost_features,
             "selected_algorithms": {"cost": cost_name, "delay": delay_name},
             "rolling_origin_selection": {"cost": cost_selection, "delay": delay_selection},
             "future_holdout_used_for_selection": False,
