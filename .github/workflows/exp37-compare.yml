@@ -1,0 +1,38 @@
+name: Experiment 37 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/monotonic_cost_boosting_exp37.py'
+      - 'backend/app/ml/experiments/adapter_exp37.py'
+      - 'tests/test_exp37_monotonic_cost_boosting.py'
+      - '.github/workflows/exp37-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {start: 2001, end: 2019}
+          - {start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - run: PYTHONPATH=. pytest -q tests/test_exp37_monotonic_cost_boosting.py
+      - env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: >-
+          python scripts/run_fast_current_experiment.py --experiment exp_37
+          --start ${{ matrix.start }} --end ${{ matrix.end }} --test-end 2025
+          --output audit_outputs/exp37_${{ matrix.start }}_${{ matrix.end }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 'exp37-${{ matrix.start }}-${{ matrix.end }}'
+          path: 'audit_outputs/exp37_${{ matrix.start }}_${{ matrix.end }}.json'
+          if-no-files-found: warn
