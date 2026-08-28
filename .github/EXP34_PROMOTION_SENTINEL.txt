@@ -1,1 +1,0 @@
-This temporary sentinel should not be merged.
