@@ -1,4 +1,4 @@
-"""Retrain-and-compare adapter for Experiment 25."""
+"""Retrain-and-compare adapter for the full Experiment 25 challenger."""
 from __future__ import annotations
 
 from backend.app.ml.experiments.milestone_delay_exp25 import (
