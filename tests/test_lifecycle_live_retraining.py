@@ -81,7 +81,7 @@ def test_year_range_retrain_calls_promoted_production_trainer(tmp_path, monkeypa
         _write_fake_artifacts(artifact_root, start, end)
         return _comparison_result()
 
-    monkeypatch.setattr(retraining, "train_window_with_promoted_cost", fake_train_window)
+    monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fake_train_window)
     result = retraining.retrain_lifecycle(2001, 2015)
 
     assert called["start"] == 2001
@@ -113,7 +113,7 @@ def test_failed_retrain_always_removes_training_marker(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("simulated training failure")
 
-    monkeypatch.setattr(retraining, "train_window_with_promoted_cost", fail)
+    monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fail)
     with pytest.raises(RuntimeError, match="simulated training failure"):
         retraining.retrain_lifecycle(2001, 2015)
     assert not (isolated_root / "2001_2015" / ".training").exists()
