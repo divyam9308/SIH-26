@@ -1,0 +1,34 @@
+name: Audit Exp34 Delay on 721 projects
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/run_exp34_721_audit.py'
+      - '.github/workflows/audit-exp34-delay-721.yml'
+      - 'backend/app/ml/experiments/path_oof_delay_exp34.py'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Run exact 721-project Delay audit
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/run_exp34_721_audit.py
+      - name: Print result
+        run: cat audit_outputs/exp34_delay_721.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp34-delay-721-audit
+          path: audit_outputs/exp34_delay_721.json
+          if-no-files-found: warn
