@@ -1,4 +1,4 @@
-name: Experiment 25 delay milestone comparison
+name: Experiment 25 full context comparison
 
 on:
   pull_request:
@@ -32,17 +32,27 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-      - name: Verify updated PAIMANA dataset contract
+      - name: Verify updated PAIMANA dataset and context contract
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+          import pandas as pd
           a=json.loads(Path('data/processed/paimana_monthly_ingestion_audit.json').read_text())
           assert a['monthly_observations'] == 195934
           assert a['unique_reported_project_codes'] == 4499
           assert a['reports_failed_parsing'] == 0
+          sample=pd.read_csv('data/processed/paimana_monthly_snapshots.csv', nrows=50, low_memory=False)
+          required={
+              'project_name','sector','ministry','implementing_agency','state',
+              'approved_cost_cr','revised_cost_cr','cumulative_expenditure_cr',
+              'physical_progress','financial_progress','current_schedule_status','milestone_status'
+          }
+          missing=sorted(required-set(sample.columns))
+          assert not missing, f'missing Exp25 context columns: {missing}'
           print('DATASET_OBSERVATIONS=', a['monthly_observations'])
           print('DATASET_PROJECT_CODES=', a['unique_reported_project_codes'])
+          print('EXP25_CONTEXT_COLUMNS=', sorted(required))
           PY
       - name: Run Experiment 25 tests
         run: PYTHONPATH=. pytest -q tests/test_exp25_milestone_delay.py
@@ -64,6 +74,7 @@ jobs:
           start='${{ matrix.start }}'; end='${{ matrix.end }}'
           r=json.loads((Path('audit_outputs')/f'exp25_{start}_{end}.json').read_text())
           m=r['overall_comparison']
+          e=r['experiment']
           print(f'WINDOW={start}_{end}')
           print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
           print(f"EXPERIMENT_COST_MAE={m['experiment_cost_mae']:.6f}")
@@ -71,9 +82,20 @@ jobs:
           print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
           print(f"EXPERIMENT_DELAY_MAE={m['experiment_delay_mae']:.6f}")
           print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"SELECTED_COST_GROUP={m.get('selected_cost_feature_group')}")
+          print(f"SELECTED_DELAY_GROUP={m.get('selected_delay_feature_group')}")
           print(f"TRAIN_MILESTONE_SHARE={m.get('training_milestone_snapshot_share')}")
           print(f"TEST_MILESTONE_SHARE={m.get('test_milestone_snapshot_share')}")
-          verdict='PROMOTION CANDIDATE' if m['cost_improvement_percentage'] >= 0 and m['delay_improvement_percentage'] > 0 else 'REGRESSION / DO NOT PROMOTE'
+          print(f"TRAIN_TYPED_PROJECT_SHARE={m.get('training_typed_project_share')}")
+          print(f"TEST_TYPED_PROJECT_SHARE={m.get('test_typed_project_share')}")
+          print(f"TRAIN_STATE_SHARE={m.get('training_state_share')}")
+          print(f"TEST_STATE_SHARE={m.get('test_state_share')}")
+          print('RAW_PROJECT_NAME_USED_AS_FEATURE=', e.get('raw_project_name_used_as_feature'))
+          verdict='PROMOTION CANDIDATE' if (
+              m['cost_improvement_percentage'] >= 0
+              and m['delay_improvement_percentage'] >= 0
+              and (m['cost_improvement_percentage'] > 0 or m['delay_improvement_percentage'] > 0)
+          ) else 'REGRESSION / DO NOT PROMOTE'
           print(f'VERDICT={verdict}')
           PY
       - uses: actions/upload-artifact@v4
