@@ -1,0 +1,78 @@
+name: Exp33 residual calibration on Exp34 Delay
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/residual_calibration_exp33_on_exp34.py'
+      - 'backend/app/ml/experiments/adapter_exp45.py'
+      - 'scripts/run_exp33_on_exp34_current_production.py'
+      - 'tests/test_exp33_on_exp34_residual_calibration.py'
+      - '.github/workflows/exp33-on-exp34-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {start: 2001, end: 2019}
+          - {start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Scientific contract tests
+        run: PYTHONPATH=. pytest -q tests/test_exp33_on_exp34_residual_calibration.py
+      - name: Compare Exp33-only calibration with current Exp34 production
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python scripts/run_exp33_on_exp34_current_production.py
+          --start ${{ matrix.start }}
+          --end ${{ matrix.end }}
+          --test-end 2025
+          --output audit_outputs/exp33_on_exp34_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Verify exact selected production baseline
+        if: matrix.end == 2021
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('audit_outputs/exp33_on_exp34_2001_2021.json').read_text())
+          metrics = payload['overall_comparison']
+          experiment = payload['experiment']
+
+          assert int(metrics['comparison_test_projects']) == 721, metrics
+          assert int(metrics['comparison_test_snapshots']) == 11200, metrics
+          assert abs(float(metrics['production_cost_mae']) - 26.872) <= 0.001, metrics
+          assert abs(float(metrics['production_delay_mae']) - 501.303) <= 0.001, metrics
+          assert abs(float(metrics['experiment_cost_mae']) - float(metrics['production_cost_mae'])) <= 1e-12, metrics
+          assert abs(float(metrics['cost_improvement_percentage'])) <= 1e-12, metrics
+          assert experiment['changed_dimension'] == 'exp33_cross_fitted_post_model_delay_calibration_only', experiment
+          assert experiment['future_holdout_used_for_calibration'] is False, experiment
+          print('Verified current production baseline and Delay-only isolation:', metrics)
+          PY
+      - name: Print ablation result
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start='${{ matrix.start }}'; end='${{ matrix.end }}'
+          payload=json.loads((Path('audit_outputs')/f'exp33_on_exp34_{start}_{end}.json').read_text())
+          print(json.dumps(payload['overall_comparison'], indent=2))
+          print(json.dumps(payload['experiment'], indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp33-on-exp34-${{ matrix.start }}-${{ matrix.end }}
+          path: audit_outputs/exp33_on_exp34_${{ matrix.start }}_${{ matrix.end }}.json
+          if-no-files-found: warn
