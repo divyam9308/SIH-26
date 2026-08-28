@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from backend.app.services.benchmark_service import peer_benchmark
 from backend.app.services.data_service import list_projects, row_to_dict, sectors, get_project
 from backend.app.services.prediction_service import project_forecast, project_prediction
-from backend.app.services.monthly_prediction_service import lifecycle_project_forecast
+from backend.app.services.monthly_prediction_service import DEFAULT_PRODUCTION_WINDOW, lifecycle_project_forecast
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -38,7 +38,7 @@ def forecast(code: str):
 
 
 @router.get("/{code}/lifecycle-forecast")
-def lifecycle_forecast(code: str, window: str = "2015_2021"):
+def lifecycle_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDOW):
     try:
         return lifecycle_project_forecast(code, window)
     except KeyError:
