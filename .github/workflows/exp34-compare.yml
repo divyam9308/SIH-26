@@ -1,0 +1,60 @@
+name: Experiment 34 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/path_oof_delay_exp34.py'
+      - 'backend/app/ml/experiments/adapter_exp34.py'
+      - 'scripts/run_fast_current_experiment.py'
+      - 'tests/test_exp34_path_oof_delay.py'
+      - '.github/workflows/exp34-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {start: 2001, end: 2019}
+          - {start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - run: PYTHONPATH=. pytest -q tests/test_exp34_path_oof_delay.py
+      - name: Compare exact current production vs Exp34
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: >-
+          python scripts/run_fast_current_experiment.py
+          --experiment exp_34
+          --start ${{ matrix.start }}
+          --end ${{ matrix.end }}
+          --test-end 2025
+          --output audit_outputs/exp34_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Print Cost and Delay comparison
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s='${{ matrix.start }}'; e='${{ matrix.end }}'
+          m=json.loads((Path('audit_outputs')/f'exp34_{s}_{e}.json').read_text())['overall_comparison']
+          print(f'WINDOW={s}_{e}')
+          print(f"PRODUCTION_COST_MAE={m['production_cost_mae']:.6f}")
+          print(f"EXP34_COST_MAE={m['experiment_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_PERCENT={m['cost_improvement_percentage']:.6f}")
+          print(f"PRODUCTION_DELAY_MAE={m['production_delay_mae']:.6f}")
+          print(f"EXP34_DELAY_MAE={m['experiment_delay_mae']:.6f}")
+          print(f"DELAY_IMPROVEMENT_PERCENT={m['delay_improvement_percentage']:.6f}")
+          print(f"DELAY_BLEND_WEIGHTS={m['delay_blend_weights']}")
+          print(f"VERDICT={m['decision']}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 'exp34-${{ matrix.start }}-${{ matrix.end }}'
+          path: 'audit_outputs/exp34_${{ matrix.start }}_${{ matrix.end }}.json'
+          if-no-files-found: warn
