@@ -81,7 +81,7 @@ def test_year_range_retrain_calls_promoted_production_trainer(tmp_path, monkeypa
         _write_fake_artifacts(artifact_root, start, end)
         return _comparison_result()
 
-    monkeypatch.setattr(retraining, "train_window_with_promoted_cost", fake_train_window)
+    monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fake_train_window)
     result = retraining.retrain_lifecycle(2001, 2015)
 
     assert called["start"] == 2001
@@ -113,7 +113,7 @@ def test_failed_retrain_always_removes_training_marker(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("simulated training failure")
 
-    monkeypatch.setattr(retraining, "train_window_with_promoted_cost", fail)
+    monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fail)
     with pytest.raises(RuntimeError, match="simulated training failure"):
         retraining.retrain_lifecycle(2001, 2015)
     assert not (isolated_root / "2001_2015" / ".training").exists()
@@ -138,78 +138,20 @@ class _Risk:
 
 def test_custom_judge_prediction_uses_exact_lifecycle_run_and_future_project(monkeypatch):
     frame = pd.DataFrame([
-        {
-            "canonical_project_id": "TRAIN",
-            "project_id": "N00000001",
-            "project_name": "Training Project",
-            "completion_year": 2015,
-            "completion_date": pd.Timestamp("2015-12-31"),
-            "snapshot_date": pd.Timestamp("2015-06-30"),
-            "approved_cost_cr": 100.0,
-            "revised_cost_cr": 110.0,
-            "expenditure_ratio": 0.5,
-            "sector": "Power",
-            "actual_cost_overrun_percentage": 10.0,
-            "actual_delay_days": 100.0,
-            "actual_risk": "MEDIUM",
-        },
-        {
-            "canonical_project_id": "TEST",
-            "project_id": "N00000002",
-            "project_name": "Held-out Project",
-            "completion_year": 2019,
-            "completion_date": pd.Timestamp("2019-12-31"),
-            "snapshot_date": pd.Timestamp("2019-03-31"),
-            "approved_cost_cr": 200.0,
-            "revised_cost_cr": 240.0,
-            "expenditure_ratio": 0.7,
-            "sector": "Railways",
-            "actual_cost_overrun_percentage": 25.0,
-            "actual_delay_days": 420.0,
-            "actual_risk": "HIGH",
-        },
-        {
-            "canonical_project_id": "TEST",
-            "project_id": "N00000002",
-            "project_name": "Held-out Project",
-            "completion_year": 2019,
-            "completion_date": pd.Timestamp("2019-12-31"),
-            "snapshot_date": pd.Timestamp("2019-09-30"),
-            "approved_cost_cr": 200.0,
-            "revised_cost_cr": 250.0,
-            "expenditure_ratio": 0.9,
-            "sector": "Railways",
-            "actual_cost_overrun_percentage": 25.0,
-            "actual_delay_days": 420.0,
-            "actual_risk": "HIGH",
-        },
+        {"canonical_project_id":"TRAIN","project_id":"N00000001","project_name":"Training Project","completion_year":2015,"completion_date":pd.Timestamp("2015-12-31"),"snapshot_date":pd.Timestamp("2015-06-30"),"approved_cost_cr":100.0,"revised_cost_cr":110.0,"expenditure_ratio":0.5,"sector":"Power","actual_cost_overrun_percentage":10.0,"actual_delay_days":100.0,"actual_risk":"MEDIUM"},
+        {"canonical_project_id":"TEST","project_id":"N00000002","project_name":"Held-out Project","completion_year":2019,"completion_date":pd.Timestamp("2019-12-31"),"snapshot_date":pd.Timestamp("2019-03-31"),"approved_cost_cr":200.0,"revised_cost_cr":240.0,"expenditure_ratio":0.7,"sector":"Railways","actual_cost_overrun_percentage":25.0,"actual_delay_days":420.0,"actual_risk":"HIGH"},
+        {"canonical_project_id":"TEST","project_id":"N00000002","project_name":"Held-out Project","completion_year":2019,"completion_date":pd.Timestamp("2019-12-31"),"snapshot_date":pd.Timestamp("2019-09-30"),"approved_cost_cr":200.0,"revised_cost_cr":250.0,"expenditure_ratio":0.9,"sector":"Railways","actual_cost_overrun_percentage":25.0,"actual_delay_days":420.0,"actual_risk":"HIGH"},
     ])
     features = ["approved_cost_cr", "revised_cost_cr", "expenditure_ratio", "sector"]
-    bundle = {
-        "metadata": {
-            "model_version": "monthly-2001-2015",
-            "run_id": "judge-run",
-            "dataset_fingerprint": "sha256:judge-dataset",
-            "training_snapshots": 1,
-            "unique_training_projects": 1,
-            "features_used": features,
-            "selected_algorithms": {"cost": "xgboost", "delay": "lightgbm"},
-        },
-        "cost": _Regressor(22.0),
-        "delay": _Regressor(360.0),
-        "risk": _Risk(),
-    }
+    bundle = {"metadata":{"model_version":"monthly-2001-2015","run_id":"judge-run","dataset_fingerprint":"sha256:judge-dataset","training_snapshots":1,"unique_training_projects":1,"features_used":features,"selected_algorithms":{"cost":"xgboost","delay":"lightgbm"}},"cost":_Regressor(22.0),"delay":_Regressor(360.0),"risk":_Risk()}
     simulation._CUSTOM_SESSIONS.clear()
     monkeypatch.setattr(simulation, "_dataset", lambda: frame)
     seen = {}
-
     def fake_bundle(start, end, expected_run_id=None):
         seen["expected_run_id"] = expected_run_id
         return bundle
-
     monkeypatch.setattr(simulation, "_artifact_bundle", fake_bundle)
     monkeypatch.setattr(simulation, "_shap_factors_for_model", lambda model, row, names: [{"feature": "revised_cost_cr", "impact": 1.0, "direction": "increases"}])
-
     session = simulation.train_custom(2001, 2015, "judge-run")
     assert seen["expected_run_id"] == "judge-run"
     assert session["run_id"] == "judge-run"
@@ -217,13 +159,11 @@ def test_custom_judge_prediction_uses_exact_lifecycle_run_and_future_project(mon
     assert session["model_family"] == "monthly_lifecycle"
     assert session["feature_count"] == len(features)
     assert session["eligible_test_years"] == [{"year": 2019, "projects": 1}]
-
     projects = simulation.custom_projects(session["session_id"], 2019)
     assert projects["run_id"] == "judge-run"
     assert projects["dataset_fingerprint"] == "sha256:judge-dataset"
     assert len(projects["items"]) == 1
     assert projects["items"][0]["snapshot_date"] == "2019-09-30"
-
     prediction = simulation.predict_custom(session["session_id"], projects["items"][0]["record_index"])
     assert prediction["run_id"] == "judge-run"
     assert prediction["dataset_fingerprint"] == "sha256:judge-dataset"
@@ -235,7 +175,6 @@ def test_custom_judge_prediction_uses_exact_lifecycle_run_and_future_project(mon
     assert prediction["model_confidence_percentage"] is None
     assert prediction["audit"]["project_excluded_from_training"] is True
     assert prediction["audit"]["actual_outcomes_sent_to_browser"] is False
-
     actual = simulation.reveal_custom(session["session_id"], prediction["record_index"])
     assert actual["run_id"] == "judge-run"
     assert actual["dataset_fingerprint"] == "sha256:judge-dataset"
