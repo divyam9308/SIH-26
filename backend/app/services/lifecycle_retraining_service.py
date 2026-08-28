@@ -16,10 +16,8 @@ import pandas as pd
 
 from backend.app.ml.monthly_lifecycle import OUTCOMES, SNAPSHOTS, SNAPSHOTS_GZ, build_training_dataset
 from backend.app.ml.monthly_training import MODEL_ROOT
-from backend.app.ml.production_cost_baseline import (
-    target_feature_contract,
-    train_window_with_promoted_cost,
-)
+from backend.app.ml.production_cost_baseline import target_feature_contract
+from backend.app.ml.production_delay_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.ml.provenance import artifact_fingerprints, file_sha256
 from backend.app.services import monthly_prediction_service
 
@@ -114,7 +112,9 @@ def _write_run_manifest(start_year: int, end_year: int, result: dict, target: Pa
         "feature_count": len(feature_contract["cost"]),
         "feature_count_by_target": {name: len(features) for name, features in feature_contract.items()},
         "production_cost_baseline": metadata.get("production_cost_baseline"),
+        "production_delay_baseline": metadata.get("production_delay_baseline"),
         "promoted_from_experiment": metadata.get("promoted_from_experiment"),
+        "promoted_delay_from_experiment": metadata.get("promoted_delay_from_experiment"),
         "metrics": {
             "cost_mae": (lifecycle_metrics.get("cost") or {}).get("MAE"),
             "delay_mae": (lifecycle_metrics.get("delay") or {}).get("MAE"),
@@ -172,7 +172,7 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     staging_root.mkdir(parents=True, exist_ok=False)
 
     try:
-        result = train_window_with_promoted_cost(
+        result = train_window_with_promoted_cost_and_delay(
             start_year,
             end_year,
             max_year,
@@ -220,7 +220,9 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "feature_count": len(feature_contract["cost"]),
         "feature_count_by_target": {name: len(features) for name, features in feature_contract.items()},
         "production_cost_baseline": metadata.get("production_cost_baseline"),
+        "production_delay_baseline": metadata.get("production_delay_baseline"),
         "promoted_from_experiment": metadata.get("promoted_from_experiment"),
+        "promoted_delay_from_experiment": metadata.get("promoted_delay_from_experiment"),
         "selected_algorithms": {
             "cost": selected.get("cost"),
             "delay": selected.get("delay"),
@@ -238,7 +240,10 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
                 "feature_count_by_target": {name: len(features) for name, features in feature_contract.items()},
                 "features_used": metadata["features_used"],
                 "cost_features_used": feature_contract["cost"],
+                "delay_features_used": feature_contract["delay"],
                 "production_cost_baseline": metadata.get("production_cost_baseline"),
+                "production_delay_baseline": metadata.get("production_delay_baseline"),
+                "delay_evaluation_contract": metadata.get("delay_evaluation_contract"),
                 "feature_quality": {
                     "data_quality_score": feature_audit.get("data_quality_score"),
                     "removed_invalid_feature_count": feature_audit.get("removed_invalid_feature_count", len(feature_audit.get("removed_features", []))),
@@ -259,5 +264,5 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "lifecycle_stages": lifecycle.get("lifecycle_stages", {}),
         "stage_distribution": lifecycle.get("stage_distribution", {}),
         "balanced_stage_summary": lifecycle.get("balanced_stage_summary", {}),
-        "leakage_guard": "Future holdout projects are excluded from selection/fitting; direct features are same-snapshot, promoted cost trajectory features use current/earlier snapshots with feature-group selection inside the training window, and priors require prior completion.",
+        "leakage_guard": "Future holdout projects are excluded from selection/fitting; direct features are same-snapshot, promoted cost trajectory features and Exp34 Delay path features use current/earlier snapshots, Delay blend weights are selected only on rolling folds inside the training period, and priors require prior completion.",
     }
