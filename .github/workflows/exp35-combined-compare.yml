@@ -1,0 +1,70 @@
+name: Exp35 Exp32 plus Exp33 comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/exp35_aft_residual_combo.py'
+      - 'backend/app/ml/experiments/adapter_exp35.py'
+      - 'scripts/run_exp35_current_production.py'
+      - 'tests/test_exp35_aft_residual_combo.py'
+      - '.github/workflows/exp35-combined-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {start: 2001, end: 2019}
+          - {start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: PYTHONPATH=. pytest -q tests/test_exp35_aft_residual_combo.py
+      - name: Compare Exp35 with current production
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python scripts/run_exp35_current_production.py
+          --start ${{ matrix.start }}
+          --end ${{ matrix.end }}
+          --test-end 2025
+          --output audit_outputs/exp35_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Verify selected current-production baseline
+        if: matrix.end == 2021
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('audit_outputs/exp35_2001_2021.json').read_text())
+          m = p['overall_comparison']
+          assert m['cost_comparison_projects'] == 721, m
+          assert m['cost_comparison_snapshots'] == 11200, m
+          assert abs(float(m['production_cost_mae']) - 26.872) <= 0.001, m
+          assert abs(float(m['production_delay_full_shared_cohort_mae']) - 501.303) <= 0.001, m
+          print('Verified current production baseline:', m)
+          PY
+      - name: Print combination results
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s='${{ matrix.start }}'; e='${{ matrix.end }}'
+          p=json.loads((Path('audit_outputs')/f'exp35_{s}_{e}.json').read_text())
+          print(json.dumps(p['overall_comparison'], indent=2))
+          print(json.dumps(p['experiment'].get('components', {}), indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp35-${{ matrix.start }}-${{ matrix.end }}
+          path: audit_outputs/exp35_${{ matrix.start }}_${{ matrix.end }}.json
+          if-no-files-found: warn
