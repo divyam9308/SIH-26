@@ -2,9 +2,9 @@
 """Evaluate whether the July 2026 PAIMANA snapshot supports a true MAE test.
 
 This script is intentionally read-only with respect to production artifacts. It
-fetches the official July 2026 report into a temporary directory, parses both
-the project snapshot and the projects completed during July, resolves identities
-with the same lifecycle code used by production, and applies the exact
+fetches only the published July 2026 report into temporary runner storage,
+parses both the project snapshot and projects completed during July, resolves
+identities with the production lifecycle code, and applies the exact
 leakage-safe rule: snapshot_date < completion_date.
 
 If no pre-completion July rows have realized cost and delay outcomes, true MAE
@@ -16,71 +16,64 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 
 from backend.app.ml.monthly_lifecycle import TARGETS, resolve_identities
 from backend.app.services.paimana_ingestion_service import (
     _fetch,
-    discover_archive_reports,
     extract_report_text,
     parse_project_list,
 )
 from scripts.ingest_paimana_completed_reports import parse_completed_projects
 
+BASE = "https://paimana-proj.mospi.gov.in"
+ARCHIVE_PATH = "/ArchiveReport/flash/2026-27/FlashReport_July_2026.pdf"
+# The first URL is the direct published archive path. The two ViewPdf forms
+# mirror PAIMANA's archive-link convention and avoid touching the archive index.
+CANDIDATE_URLS = [
+    f"{BASE}{ARCHIVE_PATH}",
+    f"{BASE}/ReportPage/ViewPdf?path={quote(ARCHIVE_PATH)}",
+    f"{BASE}/ReportPage/ViewPdf?id=&path={quote(ARCHIVE_PATH)}",
+]
+
+
+def _download_july_pdf() -> tuple[str, bytes]:
+    errors: list[str] = []
+    for url in CANDIDATE_URLS:
+        try:
+            payload = _fetch(url)
+            if payload.startswith(b"%PDF"):
+                return url, payload
+            errors.append(f"{url}: response was not a PDF ({len(payload)} bytes)")
+        except Exception as exc:  # surface every attempted official route
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+    raise RuntimeError("Could not download official July 2026 PAIMANA PDF. " + " | ".join(errors))
+
 
 def main() -> None:
-    reports = [
-        report
-        for report in discover_archive_reports()
-        if report.get("calendar_year") == 2026
-        and report.get("report_month") == "July"
-    ]
-    if not reports:
-        raise SystemExit("Official July 2026 PAIMANA Flash Report was not discovered.")
-
-    snapshot_frames: list[pd.DataFrame] = []
-    outcome_frames: list[pd.DataFrame] = []
-    source_urls: list[str] = []
+    source_url, pdf_bytes = _download_july_pdf()
+    report_month = pd.Timestamp(year=2026, month=7, day=31)
 
     with tempfile.TemporaryDirectory(prefix="paimana-july-2026-") as tmp:
-        tmpdir = Path(tmp)
-        for index, report in enumerate(reports):
-            source_url = report.get("source_url", report.get("url", ""))
-            source_urls.append(source_url)
-            pdf = tmpdir / f"july_2026_{index}.pdf"
-            pdf.write_bytes(_fetch(source_url))
-            text = extract_report_text(pdf)
-            report_month = pd.Timestamp(year=2026, month=7, day=31)
-            snapshots = parse_project_list(
-                text,
-                report_month=report_month,
-                source_report=report.get("report_label", "July 2026"),
-                source_url=source_url,
-            )
-            completed = parse_completed_projects(text, source_url, report["financial_year"])
-            if not snapshots.empty:
-                snapshot_frames.append(snapshots)
-            if not completed.empty:
-                outcome_frames.append(completed)
-
-    snapshots = (
-        pd.concat(snapshot_frames, ignore_index=True)
-        if snapshot_frames
-        else pd.DataFrame()
-    )
-    outcomes = (
-        pd.concat(outcome_frames, ignore_index=True)
-        if outcome_frames
-        else pd.DataFrame()
-    )
+        pdf = Path(tmp) / "FlashReport_July_2026.pdf"
+        pdf.write_bytes(pdf_bytes)
+        text = extract_report_text(pdf)
+        snapshots = parse_project_list(
+            text,
+            report_month=report_month,
+            source_report="July 2026",
+            source_url=source_url,
+        )
+        outcomes = parse_completed_projects(text, source_url, "2026-27")
 
     if snapshots.empty:
-        raise SystemExit("July 2026 report was found but no project snapshot rows were parsed.")
+        raise SystemExit("July 2026 report downloaded, but no project snapshot rows were parsed.")
 
-    # Deduplicate multipart report output before identity resolution.
     if "project_id" in snapshots.columns:
         snapshots = snapshots.drop_duplicates(["project_id", "snapshot_date"], keep="last")
+
     if not outcomes.empty:
         outcomes = outcomes.copy()
         outcomes["project_id"] = outcomes["project_id"].replace("", pd.NA)
@@ -93,7 +86,6 @@ def main() -> None:
 
     if outcomes.empty:
         eligible = pd.DataFrame()
-        resolved = snapshots.copy()
         verified = 0
     else:
         resolved, _identity = resolve_identities(snapshots, outcomes)
@@ -106,8 +98,7 @@ def main() -> None:
 
     payload = {
         "period": "2026-07",
-        "official_reports_found": len(reports),
-        "source_urls": source_urls,
+        "source_url": source_url,
         "july_snapshot_rows": int(len(snapshots)),
         "july_completed_outcomes_parsed": int(len(outcomes)),
         "identity_verified_july_rows": verified,
@@ -118,9 +109,6 @@ def main() -> None:
         "status": "MAE_UNAVAILABLE_NO_LEAKAGE_SAFE_REALIZED_LABELS" if eligible.empty else "LABELS_AVAILABLE_MODEL_SCORING_REQUIRED",
     }
     print("JULY_2026_EVALUATION=" + json.dumps(payload, sort_keys=True))
-
-    # A non-zero eligible cohort means a true model scoring stage can be added;
-    # zero is an expected scientific outcome and must remain a green check.
 
 
 if __name__ == "__main__":
