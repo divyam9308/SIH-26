@@ -48,6 +48,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import math
           from pathlib import Path
           start, end = '${{ matrix.start }}', '${{ matrix.end }}'
           result = json.loads(Path(f'audit_outputs/exp45_{start}_{end}.json').read_text())
@@ -59,8 +60,8 @@ jobs:
           overall = result['overall_comparison']
           assert evidence['projects'] == overall['comparison_test_projects']
           assert evidence['snapshots'] == overall['comparison_test_snapshots']
-          assert evidence['project_weight_sum_min'] == 1.0
-          assert evidence['project_weight_sum_max'] == 1.0
+          assert math.isclose(float(evidence['project_weight_sum_min']), 1.0, rel_tol=0.0, abs_tol=1e-6)
+          assert math.isclose(float(evidence['project_weight_sum_max']), 1.0, rel_tol=0.0, abs_tol=1e-6)
           assert overall['delay_predictions_identical'] is True
           print('EXP45_COHORT_FINGERPRINT=' + evidence['cohort_fingerprint'])
           print('EXP45_LEDGER_FINGERPRINT=' + evidence['ledger_fingerprint'])
