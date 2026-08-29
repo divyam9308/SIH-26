@@ -1,0 +1,81 @@
+name: Final production check after PR64
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-production-check-after-pr64.yml'
+
+jobs:
+  full-production-2001-2021:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout exact merged production commit
+        uses: actions/checkout@v4
+        with:
+          ref: afaac5706e06f5bd5ec9a2e3cebfcd246d1105a6
+      - name: Verify exact production source
+        run: |
+          test "$(git rev-parse HEAD)" = "afaac5706e06f5bd5ec9a2e3cebfcd246d1105a6"
+          echo "FINAL_PRODUCTION_SOURCE_SHA=$(git rev-parse HEAD)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Production contract tests
+        run: PYTHONPATH=. pytest -q tests/test_exp35_production_promotion.py tests/test_exp35_aft_residual_combo.py
+      - name: Fresh full production retrain and final metric report
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
+
+          result = retrain_lifecycle(2001, 2021)
+          assert result['window'] == '2001_2021', result['window']
+          assert result['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
+          assert result['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
+          assert result['promoted_from_experiment'] == 'exp_35'
+          assert result['promoted_delay_from_experiment'] == 'exp_35'
+
+          cost_mae = float(result['metrics']['cost_model']['MAE'])
+          delay_mae = float(result['metrics']['delay_model']['MAE'])
+          contract = result['metrics']['metadata']['delay_evaluation_contract']
+
+          assert int(contract['test_projects']) == 721, contract
+          assert int(contract['test_snapshots']) == 11200, contract
+          assert int(contract['calibration_cohort_projects']) == 688, contract
+          assert int(contract['aft_eligible_projects']) == 688, contract
+          assert int(contract['fallback_projects']) == 33, contract
+
+          metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
+          manifest = json.loads(Path('models/monthly_lifecycle/2001_2021/run_manifest.json').read_text())
+          assert metadata['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
+          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
+          assert metadata['delay_calibration_project_count'] == 688
+          assert manifest['status'] == 'complete'
+
+          print(f'FINAL_FRESH_PRODUCTION_COST_MAE_721={cost_mae:.6f}')
+          print(f'FINAL_FRESH_PRODUCTION_DELAY_MAE_721={delay_mae:.6f}')
+          print(f'FINAL_FRESH_PRODUCTION_PROJECTS={int(contract["test_projects"])}')
+          print(f'FINAL_FRESH_PRODUCTION_SNAPSHOTS={int(contract["test_snapshots"])}')
+          print(f'FINAL_FRESH_AFT_PROJECTS={int(contract["calibration_cohort_projects"])}')
+          print(f'FINAL_FRESH_FALLBACK_PROJECTS={int(contract["fallback_projects"])}')
+          print(f'FINAL_FRESH_AFT_ELIGIBLE_SNAPSHOTS={int(contract["aft_eligible_snapshots"])}')
+          print(f'FINAL_FRESH_DELAY_MAE_688={float(contract["promoted_exp32_exp33_mae_calibration_688"]):.6f}')
+          print('FINAL_POST_MERGE_PRODUCTION_CHECK=VERIFIED')
+          PY
+      - name: Upload final production evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-production-check-after-pr64
+          path: |
+            models/monthly_lifecycle/2001_2021/metadata.json
+            models/monthly_lifecycle/2001_2021/evaluation_results.json
+            models/monthly_lifecycle/2001_2021/run_manifest.json
+          if-no-files-found: warn
