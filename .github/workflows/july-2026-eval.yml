@@ -1,0 +1,26 @@
+name: July 2026 PAIMANA Evaluation
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/evaluate_july_2026_labels.py'
+      - '.github/workflows/july-2026-eval.yml'
+      - 'backend/app/ml/monthly_lifecycle.py'
+      - 'backend/app/services/paimana_ingestion_service.py'
+      - 'scripts/ingest_paimana_completed_reports.py'
+  workflow_dispatch:
+
+jobs:
+  july-2026-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Evaluate July 2026 label eligibility
+        run: python scripts/evaluate_july_2026_labels.py
