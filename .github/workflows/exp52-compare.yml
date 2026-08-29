@@ -1,0 +1,37 @@
+name: Experiment 52 comparison - 2001-2021 only
+on:
+  pull_request:
+    branches: [main]
+    paths: ['backend/app/ml/experiments/nextgen_common.py','backend/app/ml/experiments/delay_calibration_shrinkage_exp52.py','backend/app/ml/experiments/adapter_exp52.py','tests/test_exp52_nextgen.py','.github/workflows/exp52-compare.yml']
+  workflow_dispatch:
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/nextgen_common.py backend/app/ml/experiments/delay_calibration_shrinkage_exp52.py backend/app/ml/experiments/adapter_exp52.py
+          PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp52_nextgen.py
+      - name: Fresh 2001-2021 production and Exp52 comparison
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: python -m backend.app.ml.experiments.delay_calibration_shrinkage_exp52 --start 2001 --end 2021 --test-end 2025 --output audit_outputs/exp52_2001_2021.json
+      - name: Validate evidence contract
+        run: |
+          python - <<'PY'
+          import json,math
+          from pathlib import Path
+          item=json.loads(Path('audit_outputs/exp52_2001_2021.json').read_text());o=item['overall_comparison'];e=item['experiment'];assert o['comparison_test_projects']==721 and o['comparison_test_snapshots']==11200;assert abs(float(o['production_cost_mae'])-26.287)<=.005;assert abs(float(o['production_delay_mae'])-431.618)<=.005;m=json.loads(Path(e['ledger_manifest_path']).read_text());assert m['projects']==721 and m['snapshots']==11200;assert math.isclose(float(m['project_weight_sum_min']),1,abs_tol=1e-6);assert math.isclose(float(m['project_weight_sum_max']),1,abs_tol=1e-6);print('EXP52_EXECUTION_VERDICT='+o['execution_verdict']);print('EXP52_SCIENTIFIC_VERDICT='+o['scientific_verdict'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp52-2001-2021
+          path: |
+            audit_outputs/exp52_2001_2021.json
+            models/monthly_lifecycle/experiments/exp_52/2001_2021/**/*
+          if-no-files-found: error
