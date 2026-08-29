@@ -23,4 +23,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Evaluate July 2026 label eligibility
-        run: python scripts/evaluate_july_2026_labels.py
+        run: PYTHONPATH=. python scripts/evaluate_july_2026_labels.py
