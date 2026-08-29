@@ -1,0 +1,53 @@
+name: Audit PR64 Cost on fixed 688 cohort
+
+on:
+  pull_request:
+    branches: [experiment-35-exp32-exp33-combined]
+    paths:
+      - 'scripts/audit_pr64_cost_on_688.py'
+      - '.github/workflows/audit-pr64-cost-688.yml'
+  workflow_dispatch:
+
+jobs:
+  audit-cost-688:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m py_compile scripts/audit_pr64_cost_on_688.py
+      - name: Freshly retrain Cost and score exact PR64 688 cohort
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/audit_pr64_cost_on_688.py --output audit_outputs/pr64_cost_688.json
+      - name: Print and validate audit result
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('audit_outputs/pr64_cost_688.json').read_text())
+          full = p['full_721']
+          selected = p['selected_688']
+          excluded = p['excluded_33']
+          assert full['projects'] == 721, full
+          assert full['snapshots'] == 11200, full
+          assert abs(float(full['production_exp12_cost_mae']) - 26.872) <= 0.001, full
+          assert abs(float(full['pr64_exp12_plus_exp33_cost_mae']) - 26.287) <= 0.001, full
+          assert selected['projects'] == 688, selected
+          assert excluded['projects'] == 33, excluded
+          print(json.dumps(p, indent=2))
+          print(f"COST_MAE_BASE_688={selected['production_exp12_cost_mae']:.6f}")
+          print(f"COST_MAE_PR64_688={selected['pr64_exp12_plus_exp33_cost_mae']:.6f}")
+          print(f"COST_IMPROVEMENT_688={selected['improvement_percentage']:.6f}%")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr64-cost-688-audit
+          path: audit_outputs/pr64_cost_688.json
+          if-no-files-found: warn
