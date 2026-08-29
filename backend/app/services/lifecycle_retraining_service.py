@@ -17,7 +17,7 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import OUTCOMES, SNAPSHOTS, SNAPSHOTS_GZ, build_training_dataset
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml.production_cost_baseline import target_feature_contract
-from backend.app.ml.production_delay_baseline import train_window_with_promoted_cost_and_delay
+from backend.app.ml.production_exp35_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.ml.provenance import artifact_fingerprints, file_sha256
 from backend.app.services import monthly_prediction_service
 
@@ -264,5 +264,5 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "lifecycle_stages": lifecycle.get("lifecycle_stages", {}),
         "stage_distribution": lifecycle.get("stage_distribution", {}),
         "balanced_stage_summary": lifecycle.get("balanced_stage_summary", {}),
-        "leakage_guard": "Future holdout projects are excluded from selection/fitting; direct features are same-snapshot, promoted cost trajectory features and Exp34 Delay path features use current/earlier snapshots, Delay blend weights are selected only on rolling folds inside the training period, and priors require prior completion.",
+        "leakage_guard": "Future holdout projects are excluded from selection/fitting; direct features are same-snapshot, promoted cost trajectory features and Exp34 Delay path features use current/earlier snapshots, Exp32 remaining-time models and Exp33 residual calibrators use only rolling folds inside the training period, future holdout outcomes are excluded from all model/weight/calibration selection, and rows without planned-completion evidence retain the Exp34 Delay fallback.",
     }
