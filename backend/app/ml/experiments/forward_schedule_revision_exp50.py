@@ -105,7 +105,7 @@ def build_forward_schedule_revision_dataset(history,*,cutoff=None):
                 if has and days<=horizon: frame.at[index,label]=1.0
                 elif followup>=horizon: frame.at[index,label]=0.0
             future12=[move for event_pos,move in zip(positions,moves) if event_pos>pos and float((dates[event_pos]-dates[pos])/np.timedelta64(1,"D"))<=366]
-            if followup>=366 or future12: frame.at[index,"schedule_revision_count_next_12m"]=len(future12)
+            if followup>=366: frame.at[index,"schedule_revision_count_next_12m"]=len(future12)
             if has:
                 move=moves[pointer]; frame.at[index,"auxiliary_next_revision_observed"]=1.0; frame.at[index,"days_to_next_schedule_revision"]=days; frame.at[index,"next_schedule_revision_days"]=move; frame.at[index,"next_schedule_revision_extension"]=float(move>0)
     return frame
@@ -137,7 +137,7 @@ def _rows_for_keys(source,target):
 
 
 def _diagnostics(rows,predictions,pool):
-    result={"meaningful_revision_threshold_days":MIN_SCHEDULE_REVISION_DAYS,"training_rows":len(pool),"training_projects":pool.canonical_project_id.nunique(),"observed_revision_events":int(pool.auxiliary_next_revision_observed.sum()),"censored_or_no_next_event_rows":int((pool.auxiliary_next_revision_observed==0).sum())}
+    result={"meaningful_revision_threshold_days":MIN_SCHEDULE_REVISION_DAYS,"training_rows":len(pool),"training_projects":pool.canonical_project_id.nunique(),"observed_revision_events":int(pool.groupby("canonical_project_id")["exp50_prior_schedule_revision_count"].max().sum()),"censored_or_no_next_event_rows":int((pool.auxiliary_next_revision_observed==0).sum())}
     for months,prediction in ((3,"exp50_revision_probability_3m"),(6,"exp50_revision_probability_6m"),(12,"exp50_revision_probability_12m")):
         label=f"schedule_revision_within_{months}m"; mask=rows[label].notna(); y=rows.loc[mask,label].to_numpy(float); p=predictions.loc[mask,prediction].to_numpy(float); item={"available_rows":int(mask.sum()),"prevalence":float(y.mean()) if len(y) else None}
         if len(np.unique(y))>1:item.update({"roc_auc":roc_auc_score(y,p),"pr_auc":average_precision_score(y,p),"brier_score":brier_score_loss(y,p)})
