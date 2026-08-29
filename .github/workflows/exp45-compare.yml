@@ -1,0 +1,110 @@
+name: Experiment 45 comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/cost_revision_dynamics_exp45.py'
+      - 'backend/app/ml/experiments/adapter_exp45.py'
+      - 'backend/app/ml/experiments/prediction_ledger.py'
+      - 'scripts/run_exp45_current_production.py'
+      - 'tests/test_exp45_cost_revision_dynamics.py'
+      - '.github/workflows/exp45-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {start: 2001, end: 2019}
+          - {start: 2001, end: 2021}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused safety tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/cost_revision_dynamics_exp45.py backend/app/ml/experiments/adapter_exp45.py scripts/run_exp45_current_production.py
+          PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp45_cost_revision_dynamics.py
+      - name: Fresh production and Exp45 comparison
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python scripts/run_exp45_current_production.py
+          --start ${{ matrix.start }}
+          --end ${{ matrix.end }}
+          --test-end 2025
+          --output audit_outputs/exp45_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Validate ledger evidence
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          start, end = '${{ matrix.start }}', '${{ matrix.end }}'
+          result = json.loads(Path(f'audit_outputs/exp45_{start}_{end}.json').read_text())
+          experiment = result['experiment']
+          ledger = Path(experiment['ledger_path'])
+          manifest = Path(experiment['ledger_manifest_path'])
+          assert ledger.exists() and manifest.exists(), (ledger, manifest)
+          evidence = json.loads(manifest.read_text())
+          overall = result['overall_comparison']
+          assert evidence['projects'] == overall['comparison_test_projects']
+          assert evidence['snapshots'] == overall['comparison_test_snapshots']
+          assert evidence['project_weight_sum_min'] == 1.0
+          assert evidence['project_weight_sum_max'] == 1.0
+          assert overall['delay_predictions_identical'] is True
+          print('EXP45_COHORT_FINGERPRINT=' + evidence['cohort_fingerprint'])
+          print('EXP45_LEDGER_FINGERPRINT=' + evidence['ledger_fingerprint'])
+          print('EXP45_LEDGER_SHA256=' + evidence['ledger_file_sha256'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp45-${{ matrix.start }}-${{ matrix.end }}
+          path: |
+            audit_outputs/exp45_${{ matrix.start }}_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_45/${{ matrix.start }}_${{ matrix.end }}/**/prediction_ledger.csv
+            models/monthly_lifecycle/experiments/exp_45/${{ matrix.start }}_${{ matrix.end }}/**/prediction_ledger_manifest.json
+          if-no-files-found: error
+
+  verdict:
+    if: always()
+    needs: compare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: exp45-*
+          path: evidence
+          merge-multiple: true
+      - name: Emit execution and scientific verdicts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          if '${{ needs.compare.result }}' != 'success':
+              print('EXP45_EXECUTION_VERDICT=EXECUTION INVALID')
+              print('EXP45_SCIENTIFIC_VERDICT=DO NOT PROMOTE')
+              raise SystemExit('Exp45 execution failed; inspect comparison jobs')
+          rows = {}
+          for end in (2019, 2021):
+              path = next(Path('evidence').rglob(f'exp45_2001_{end}.json'))
+              rows[end] = json.loads(path.read_text())['overall_comparison']
+              item = rows[end]
+              print(f'EXP45_2001_{end}_PRODUCTION_COST_MAE={item["production_cost_mae"]}')
+              print(f'EXP45_2001_{end}_EXPERIMENT_COST_MAE={item["experiment_cost_mae"]}')
+              print(f'EXP45_2001_{end}_COST_IMPROVEMENT_PERCENT={item["cost_improvement_percentage"]}')
+              print(f'EXP45_2001_{end}_BOOTSTRAP_CI={item["paired_project_bootstrap"]["improvement_95pct_ci"]}')
+          promote = all(rows[end]['cost_improvement_percentage'] > 0 for end in rows)
+          print('EXP45_EXECUTION_VERDICT=EXECUTION VALID')
+          print('EXP45_SCIENTIFIC_VERDICT=' + ('PROMOTION CANDIDATE' if promote else 'DO NOT PROMOTE'))
+          PY
