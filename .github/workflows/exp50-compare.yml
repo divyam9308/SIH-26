@@ -1,0 +1,62 @@
+name: Experiment 50 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths: ['backend/app/ml/experiments/forward_schedule_revision_exp50.py','backend/app/ml/experiments/adapter_exp50.py','backend/app/ml/experiments/prediction_ledger.py','scripts/run_exp50_current_production.py','tests/test_exp50_forward_schedule_revision.py','.github/workflows/exp50-compare.yml']
+  workflow_dispatch:
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{start: 2001,end: 2019},{start: 2001,end: 2021}]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12',cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused safety tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/forward_schedule_revision_exp50.py backend/app/ml/experiments/adapter_exp50.py scripts/run_exp50_current_production.py
+          PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp50_forward_schedule_revision.py
+      - name: Fresh production and Exp50 comparison
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: >-
+          python scripts/run_exp50_current_production.py --start ${{ matrix.start }} --end ${{ matrix.end }} --test-end 2025 --output audit_outputs/exp50_${{ matrix.start }}_${{ matrix.end }}.json
+      - name: Validate ledger, routes and auxiliary evidence
+        run: |
+          python - <<'PY'
+          import json,math
+          from pathlib import Path
+          start,end='${{ matrix.start }}','${{ matrix.end }}';result=json.loads(Path(f'audit_outputs/exp50_{start}_{end}.json').read_text());experiment,overall=result['experiment'],result['overall_comparison'];ledger,manifest=Path(experiment['ledger_path']),Path(experiment['ledger_manifest_path']);assert ledger.exists() and manifest.exists();evidence=json.loads(manifest.read_text());assert evidence['projects']==overall['comparison_test_projects'];assert evidence['snapshots']==overall['comparison_test_snapshots'];assert math.isclose(float(evidence['project_weight_sum_min']),1,abs_tol=1e-6);assert math.isclose(float(evidence['project_weight_sum_max']),1,abs_tol=1e-6);assert overall['cost_predictions_identical'];assert overall['fallback_route']['production_delay_mae']==overall['fallback_route']['experiment_delay_mae'];assert experiment['auxiliary_diagnostics']['holdout_projects_excluded_from_auxiliary_training']>0
+          for path in experiment['audit_artifacts'].values():assert Path(path).exists(),path
+          print('EXP50_COHORT_FINGERPRINT='+evidence['cohort_fingerprint']);print('EXP50_LEDGER_FINGERPRINT='+evidence['ledger_fingerprint']);print('EXP50_LEDGER_SHA256='+evidence['ledger_file_sha256'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp50-${{ matrix.start }}-${{ matrix.end }}
+          path: |
+            audit_outputs/exp50_${{ matrix.start }}_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_50/${{ matrix.start }}_${{ matrix.end }}/**/*
+          if-no-files-found: error
+  verdict:
+    if: always()
+    needs: compare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'exp50-*',path: evidence,merge-multiple: true}
+      - name: Emit execution and scientific verdicts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          if '${{ needs.compare.result }}'!='success':print('EXP50_EXECUTION_VERDICT=EXECUTION INVALID');print('EXP50_SCIENTIFIC_VERDICT=DO NOT PROMOTE');raise SystemExit('Exp50 execution failed')
+          rows={}
+          for end in (2019,2021):
+              item=json.loads(next(Path('evidence').rglob(f'exp50_2001_{end}.json')).read_text());rows[end]=item['overall_comparison'];aux=item['experiment']['auxiliary_diagnostics'];row=rows[end];print(f'EXP50_2001_{end}_PRODUCTION_DELAY_MAE={row["production_delay_mae"]}');print(f'EXP50_2001_{end}_EXPERIMENT_DELAY_MAE={row["experiment_delay_mae"]}');print(f'EXP50_2001_{end}_DELAY_IMPROVEMENT_PERCENT={row["delay_improvement_percentage"]}');print(f'EXP50_2001_{end}_BOOTSTRAP_CI={row["paired_project_bootstrap"]["improvement_95pct_ci"]}');print(f'EXP50_AUX_REVISION_EVENTS={aux["observed_revision_events"]}');print(f'EXP50_AFT_PROJECTS={row["aft_projects"]}');print(f'EXP50_FALLBACK_PROJECTS={row["fallback_projects"]}')
+          promote=all(rows[end]['delay_improvement_percentage']>0 for end in rows) and rows[2021]['paired_project_bootstrap']['probability_candidate_better']>=.5;print('EXP50_EXECUTION_VERDICT=EXECUTION VALID');print('EXP50_SCIENTIFIC_VERDICT='+('PROMOTION CANDIDATE' if promote else 'DO NOT PROMOTE'))
+          PY
