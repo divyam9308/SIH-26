@@ -1,11 +1,11 @@
 """Canonical row-level evidence ledger for isolated ML experiments.
 
 Future experiment PRs should persist the exact paired production/challenger
-predictions used for headline MAE.  The ledger makes later slice analysis and
+predictions used for headline MAE. The ledger makes later slice analysis and
 post-mortems reproducible without retraining the model or trusting a summary
 number copied into a PR description.
 
-The writer is deliberately experiment-only infrastructure.  It does not alter
+The writer is deliberately experiment-only infrastructure. It does not alter
 production model artifacts, selection, or prediction behavior.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -32,7 +32,13 @@ DEFAULT_SLICE_COLUMNS = (
     "implementing_agency",
     "state",
     "scale_bucket",
+    "approved_cost_crore",
+    "cost_escalation_pct",
+    "schedule_slippage_days",
+    "duration_ratio",
     "history_observations",
+    "exp12_history_observation_count",
+    "exp34_observations_seen",
     "parser_family",
     "experiment_route",
 )
@@ -56,9 +62,13 @@ def _prediction_array(values, *, rows: pd.DataFrame, name: str) -> np.ndarray:
         if values not in rows:
             raise ValueError(f"prediction ledger source column is missing: {values}")
         values = rows[values]
-    array = pd.to_numeric(pd.Series(values, index=rows.index), errors="coerce").to_numpy(dtype=float)
-    if len(array) != len(rows):
-        raise ValueError(f"{name} must have exactly {len(rows)} values")
+    if isinstance(values, pd.Series):
+        raw = values.to_numpy(copy=True)
+    else:
+        raw = np.asarray(values)
+    if raw.ndim != 1 or len(raw) != len(rows):
+        raise ValueError(f"{name} must have exactly {len(rows)} one-dimensional values")
+    array = pd.to_numeric(pd.Series(raw), errors="coerce").to_numpy(dtype=float)
     if not np.isfinite(array).all():
         raise ValueError(f"{name} contains missing or non-finite values")
     return array
@@ -160,46 +170,74 @@ def build_prediction_ledger(
     """Build the canonical paired row-level evidence table.
 
     Predictions can be arrays/Series or names of columns already present in
-    ``rows``.  The caller must pass both production and experiment predictions
-    for each target it wants in the ledger.  This prevents a target-specific
-    challenger from accidentally fabricating evidence for an unchanged target.
+    ``rows``. Arrays are interpreted in the caller's incoming row order, then
+    carried with those rows through canonical sorting. The caller must pass both
+    production and experiment predictions for each target it wants in the
+    ledger. This prevents target-specific challengers from fabricating evidence
+    for an unchanged target.
     """
     if rows.empty:
         raise ValueError("prediction ledger source rows cannot be empty")
     if not str(experiment_id).strip() or not str(window).strip():
         raise ValueError("prediction ledger requires experiment_id and window")
 
-    cohort = _canonical_cohort(rows)
-    ordered = rows.copy()
-    ordered["canonical_project_id"] = ordered["canonical_project_id"].astype("string").str.strip()
-    ordered["snapshot_date"] = pd.to_datetime(ordered["snapshot_date"], errors="coerce")
-    ordered["sample_weight"] = pd.to_numeric(ordered["sample_weight"], errors="coerce")
-    ordered = ordered.sort_values(list(KEY_COLUMNS), kind="mergesort").reset_index(drop=True)
-
-    ledger = cohort.copy()
-    ledger.insert(0, "window", str(window))
-    ledger.insert(0, "experiment_id", str(experiment_id))
-
-    requested_extra = tuple(extra_columns) if extra_columns is not None else DEFAULT_SLICE_COLUMNS
-    for column in requested_extra:
-        if column in ordered and column not in ledger:
-            ledger[column] = ordered[column].to_numpy(copy=True)
+    # Validate the incoming cohort before attaching predictions. Keep caller row
+    # order until every array prediction has been attached to its source row.
+    _canonical_cohort(rows)
+    working = rows.copy().reset_index(drop=True)
+    working["canonical_project_id"] = working["canonical_project_id"].astype("string").str.strip()
+    working["snapshot_date"] = pd.to_datetime(working["snapshot_date"], errors="coerce")
+    working["sample_weight"] = pd.to_numeric(working["sample_weight"], errors="coerce")
 
     cost_requested = production_cost_prediction is not None or experiment_cost_prediction is not None
     if cost_requested:
         if production_cost_prediction is None or experiment_cost_prediction is None:
             raise ValueError("Cost ledger requires both production and experiment predictions")
-        if actual_cost_column not in ordered:
+        if actual_cost_column not in working:
             raise ValueError(f"Cost ledger actual column is missing: {actual_cost_column}")
-        ledger[TARGET_SPECS["cost"]["actual"]] = _prediction_array(
-            ordered[actual_cost_column], rows=ordered, name=actual_cost_column
+        working["__ledger_actual_cost"] = _prediction_array(
+            working[actual_cost_column], rows=working, name=actual_cost_column
         )
-        ledger[TARGET_SPECS["cost"]["production"]] = _prediction_array(
-            production_cost_prediction, rows=ordered, name="production_cost_prediction"
+        working["__ledger_production_cost"] = _prediction_array(
+            production_cost_prediction, rows=working, name="production_cost_prediction"
         )
-        ledger[TARGET_SPECS["cost"]["experiment"]] = _prediction_array(
-            experiment_cost_prediction, rows=ordered, name="experiment_cost_prediction"
+        working["__ledger_experiment_cost"] = _prediction_array(
+            experiment_cost_prediction, rows=working, name="experiment_cost_prediction"
         )
+
+    delay_requested = production_delay_prediction is not None or experiment_delay_prediction is not None
+    if delay_requested:
+        if production_delay_prediction is None or experiment_delay_prediction is None:
+            raise ValueError("Delay ledger requires both production and experiment predictions")
+        if actual_delay_column not in working:
+            raise ValueError(f"Delay ledger actual column is missing: {actual_delay_column}")
+        working["__ledger_actual_delay"] = _prediction_array(
+            working[actual_delay_column], rows=working, name=actual_delay_column
+        )
+        working["__ledger_production_delay"] = _prediction_array(
+            production_delay_prediction, rows=working, name="production_delay_prediction"
+        )
+        working["__ledger_experiment_delay"] = _prediction_array(
+            experiment_delay_prediction, rows=working, name="experiment_delay_prediction"
+        )
+
+    if not cost_requested and not delay_requested:
+        raise ValueError("prediction ledger requires at least one target prediction pair")
+
+    working = working.sort_values(list(KEY_COLUMNS), kind="mergesort").reset_index(drop=True)
+    ledger = working[[*KEY_COLUMNS, "sample_weight"]].copy()
+    ledger.insert(0, "window", str(window))
+    ledger.insert(0, "experiment_id", str(experiment_id))
+
+    requested_extra = tuple(extra_columns) if extra_columns is not None else DEFAULT_SLICE_COLUMNS
+    for column in requested_extra:
+        if column in working and column not in ledger:
+            ledger[column] = working[column].to_numpy(copy=True)
+
+    if cost_requested:
+        ledger[TARGET_SPECS["cost"]["actual"]] = working["__ledger_actual_cost"].to_numpy(dtype=float)
+        ledger[TARGET_SPECS["cost"]["production"]] = working["__ledger_production_cost"].to_numpy(dtype=float)
+        ledger[TARGET_SPECS["cost"]["experiment"]] = working["__ledger_experiment_cost"].to_numpy(dtype=float)
         ledger["production_cost_abs_error"] = (
             ledger["production_cost_prediction"] - ledger["actual_cost_overrun_percentage"]
         ).abs()
@@ -210,21 +248,10 @@ def build_prediction_ledger(
             ledger["production_cost_abs_error"] - ledger["experiment_cost_abs_error"]
         )
 
-    delay_requested = production_delay_prediction is not None or experiment_delay_prediction is not None
     if delay_requested:
-        if production_delay_prediction is None or experiment_delay_prediction is None:
-            raise ValueError("Delay ledger requires both production and experiment predictions")
-        if actual_delay_column not in ordered:
-            raise ValueError(f"Delay ledger actual column is missing: {actual_delay_column}")
-        ledger[TARGET_SPECS["delay"]["actual"]] = _prediction_array(
-            ordered[actual_delay_column], rows=ordered, name=actual_delay_column
-        )
-        ledger[TARGET_SPECS["delay"]["production"]] = _prediction_array(
-            production_delay_prediction, rows=ordered, name="production_delay_prediction"
-        )
-        ledger[TARGET_SPECS["delay"]["experiment"]] = _prediction_array(
-            experiment_delay_prediction, rows=ordered, name="experiment_delay_prediction"
-        )
+        ledger[TARGET_SPECS["delay"]["actual"]] = working["__ledger_actual_delay"].to_numpy(dtype=float)
+        ledger[TARGET_SPECS["delay"]["production"]] = working["__ledger_production_delay"].to_numpy(dtype=float)
+        ledger[TARGET_SPECS["delay"]["experiment"]] = working["__ledger_experiment_delay"].to_numpy(dtype=float)
         ledger["production_delay_abs_error"] = (
             ledger["production_delay_prediction"] - ledger["actual_delay_days"]
         ).abs()
@@ -287,6 +314,7 @@ def write_prediction_ledger(
     directory: Path,
     *,
     extra_manifest: dict | None = None,
+    overwrite: bool = False,
 ) -> dict:
     """Atomically persist canonical CSV + manifest and return their metadata."""
     validate_prediction_ledger(ledger)
@@ -294,6 +322,8 @@ def write_prediction_ledger(
     directory.mkdir(parents=True, exist_ok=True)
     ledger_path = directory / LEDGER_FILENAME
     manifest_path = directory / LEDGER_MANIFEST_FILENAME
+    if not overwrite and (ledger_path.exists() or manifest_path.exists()):
+        raise FileExistsError(f"prediction ledger evidence is immutable once written: {directory}")
 
     csv_tmp = directory / f".{LEDGER_FILENAME}.tmp"
     ledger.to_csv(
