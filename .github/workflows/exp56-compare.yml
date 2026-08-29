@@ -1,0 +1,26 @@
+name: Experiment 56 comparison - 2001-2021 only
+on:
+ pull_request:
+  branches: [main]
+  paths: ['backend/app/ml/experiments/nextgen_common.py','backend/app/ml/experiments/reporting_behavior_cost_exp56.py','backend/app/ml/experiments/adapter_exp56.py','tests/test_exp56_nextgen.py','.github/workflows/exp56-compare.yml']
+ workflow_dispatch:
+jobs:
+ compare:
+  runs-on: ubuntu-latest
+  timeout-minutes: 360
+  steps:
+   - uses: actions/checkout@v4
+   - uses: actions/setup-python@v5
+     with: {python-version: '3.12', cache: pip}
+   - run: pip install -r requirements-dev.txt
+   - run: python -m py_compile backend/app/ml/experiments/nextgen_common.py backend/app/ml/experiments/reporting_behavior_cost_exp56.py backend/app/ml/experiments/adapter_exp56.py && PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp56_nextgen.py
+   - env: {PYTHONPATH: '${{ github.workspace }}'}
+     run: python -m backend.app.ml.experiments.reporting_behavior_cost_exp56 --start 2001 --end 2021 --test-end 2025 --output audit_outputs/exp56_2001_2021.json
+   - uses: actions/upload-artifact@v4
+     if: always()
+     with:
+      name: exp56-2001-2021
+      path: |
+       audit_outputs/exp56_2001_2021.json
+       models/monthly_lifecycle/experiments/exp_56/2001_2021/**/*
+      if-no-files-found: error

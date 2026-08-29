@@ -1,0 +1,4 @@
+import pandas as pd
+from backend.app.ml.experiments.reporting_behavior_cost_exp56 import engineer_reporting
+def test_reporting_features_are_prefix_stable():
+ base=pd.DataFrame({"canonical_project_id":["a","a"],"snapshot_date":["2020-01-01","2020-02-01"],"revised_cost_cr":[100,100],"cumulative_expenditure_cr":[10,10],"schedule_slippage_days":[0,0],"planned_completion_date":["2022-01-01"]*2,"revised_completion_date":[None,None]});a=engineer_reporting(base).iloc[0];ext=pd.concat([base,pd.DataFrame({"canonical_project_id":["a"],"snapshot_date":["2020-03-01"],"revised_cost_cr":[120],"cumulative_expenditure_cr":[30],"schedule_slippage_days":[60],"planned_completion_date":["2022-01-01"],"revised_completion_date":["2022-03-01"]})],ignore_index=True);b=engineer_reporting(ext).iloc[0];assert a["exp56_history_count"]==b["exp56_history_count"]==1
