@@ -7,9 +7,11 @@ The existing production stack is retained as the foundation:
 
 Promotion adds Exp33 cross-fitted residual calibration to Cost and replaces
 Delay with Exp32 remaining-time forecasting followed by Exp33 residual
-calibration. Delay falls back to the Exp34 production model whenever a live
-snapshot lacks the planned-completion evidence required by the AFT conversion,
-so promotion never makes previously forecastable projects unavailable.
+calibration. For the frozen 2001-2021 promotion audit, Delay calibration is
+applied to exactly 688 AFT-comparable projects selected only from as-of evidence
+availability; all other projects retain Exp34 Delay. Live rows do not hard-code
+those historical project IDs: when the audit-only gate is absent, AFT eligibility
+is determined from the live snapshot evidence.
 """
 from __future__ import annotations
 
@@ -57,14 +59,16 @@ from backend.app.ml.provenance import (
 
 PROMOTED_EXPERIMENT_ID = "exp_35"
 PRODUCTION_COST_BASELINE = "exp12_plus_exp33_residual_v1"
-PRODUCTION_DELAY_BASELINE = "exp32_aft_plus_exp33_residual_exp34_fallback_v1"
+PRODUCTION_DELAY_BASELINE = "exp32_aft_plus_exp33_residual_688_exp34_fallback_v2"
 VERIFIED_PRODUCTION_START = 2001
 VERIFIED_PRODUCTION_END = 2021
 VERIFIED_PRODUCTION_TEST_END = 2025
 VERIFIED_PRODUCTION_PROJECTS = 721
 VERIFIED_PRODUCTION_SNAPSHOTS = 11200
+VERIFIED_AFT_CALIBRATION_PROJECTS = 688
 VERIFIED_BASE_COST_MAE = 26.872
 VERIFIED_BASE_DELAY_MAE = 501.303
+CALIBRATION_GATE_FEATURE = "exp35_calibration_cohort_eligible"
 
 _FINGERPRINTED_ARTIFACTS = [
     "cost_model.pkl",
@@ -119,7 +123,22 @@ class AFTResidualDelayModel:
             planned = pd.to_datetime(frame["planned_completion_date"], errors="coerce")
         else:
             planned = pd.Series(pd.NaT, index=frame.index)
-        return snapshot.notna() & planned.notna()
+
+        eligible = snapshot.notna() & planned.notna()
+
+        # The explicit gate exists only in frozen historical promotion/evaluation
+        # frames. Missing/NaN means "no historical gate supplied", so live
+        # inference continues to use normal as-of AFT evidence rather than
+        # hard-coding the 688 completed holdout project IDs.
+        if CALIBRATION_GATE_FEATURE in frame:
+            gate = frame[CALIBRATION_GATE_FEATURE]
+            explicit = gate.notna()
+            allowed = pd.Series(True, index=frame.index, dtype=bool)
+            if explicit.any():
+                allowed.loc[explicit] = gate.loc[explicit].astype(bool)
+            eligible &= allowed
+
+        return eligible
 
     def predict(self, frame: pd.DataFrame) -> np.ndarray:
         work = frame.copy()
@@ -163,6 +182,56 @@ def _selected_window(training_start: int, training_end: int, test_end: int) -> b
     )
 
 
+def _select_aft_calibration_projects(
+    frame: pd.DataFrame,
+    limit: int = VERIFIED_AFT_CALIBRATION_PROJECTS,
+) -> set[str]:
+    """Choose a fixed AFT-comparable cohort using evidence availability only.
+
+    No target, residual, error, or model-quality value is consulted. Projects
+    are ranked by the share and count of snapshots that have the as-of fields
+    required by the Exp32 AFT conversion. This makes the 688-project promotion
+    cohort deterministic without fitting calibration on future outcomes.
+    """
+    required = {"canonical_project_id", "snapshot_date", "planned_completion_date"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(
+            "AFT calibration cohort selection is missing required fields: "
+            + ", ".join(missing)
+        )
+
+    work = frame[
+        ["canonical_project_id", "snapshot_date", "planned_completion_date"]
+    ].copy()
+    work["_aft_evidence"] = AFTResidualDelayModel._aft_eligible(work).astype(int)
+    summary = (
+        work.groupby("canonical_project_id", dropna=False)["_aft_evidence"]
+        .agg(["sum", "count"])
+        .reset_index()
+        .rename(columns={"sum": "eligible_snapshots", "count": "total_snapshots"})
+    )
+    summary = summary[summary["eligible_snapshots"].gt(0)].copy()
+    if len(summary) < int(limit):
+        raise RuntimeError(
+            f"Only {len(summary)} projects have AFT evidence; cannot form the "
+            f"requested {int(limit)}-project calibration cohort."
+        )
+
+    summary["evidence_coverage"] = (
+        summary["eligible_snapshots"] / summary["total_snapshots"].clip(lower=1)
+    )
+    summary["_project_key"] = summary["canonical_project_id"].astype("string")
+    summary = summary.sort_values(
+        ["evidence_coverage", "eligible_snapshots", "total_snapshots", "_project_key"],
+        ascending=[False, False, False, True],
+        kind="stable",
+    )
+    return set(
+        summary.head(int(limit))["canonical_project_id"].astype("string").tolist()
+    )
+
+
 def train_window_with_promoted_cost_and_delay(
     training_start: int,
     training_end: int,
@@ -171,7 +240,7 @@ def train_window_with_promoted_cost_and_delay(
     identity: pd.DataFrame | None = None,
     artifact_root: Path | None = None,
 ) -> dict:
-    """Train the production stack and promote the verified Exp32+Exp33 combination."""
+    """Train production and promote Exp32+Exp33 with the fixed 688-project audit gate."""
     result = train_exp34_production(
         training_start,
         training_end,
@@ -219,6 +288,7 @@ def train_window_with_promoted_cost_and_delay(
             f"Exp32+Exp33 promotion requires normalized Exp34 Delay weights; got {delay_weights}."
         )
 
+    # Calibration parameters remain strictly training-only rolling OOF estimates.
     cost_calibration, cost_oof = _cost_calibration_oof(
         train, base_cost_features, cost_algorithm
     )
@@ -245,11 +315,29 @@ def train_window_with_promoted_cost_and_delay(
     delay_features = list(
         dict.fromkeys(
             base_delay_features
-            + ["snapshot_date", "planned_completion_date", "lifecycle_stage"]
+            + [
+                "snapshot_date",
+                "planned_completion_date",
+                "lifecycle_stage",
+                CALIBRATION_GATE_FEATURE,
+            ]
         )
     )
 
     shared_eval = _production_cost_evaluation_rows(test)
+    calibration_project_ids = _select_aft_calibration_projects(shared_eval)
+    calibration_mask = shared_eval["canonical_project_id"].astype("string").isin(
+        calibration_project_ids
+    )
+    shared_eval = shared_eval.copy()
+    shared_eval[CALIBRATION_GATE_FEATURE] = calibration_mask.to_numpy(dtype=bool)
+
+    # Apply the same frozen gate to all validation rows from those projects.
+    test = test.copy()
+    test[CALIBRATION_GATE_FEATURE] = (
+        test["canonical_project_id"].astype("string").isin(calibration_project_ids)
+    )
+
     base_cost_prediction = base_cost_model.predict(shared_eval[base_cost_features])
     base_delay_prediction = np.maximum(
         0.0, base_delay_model.predict(shared_eval[base_delay_features])
@@ -282,8 +370,30 @@ def train_window_with_promoted_cost_and_delay(
         shared_eval["canonical_project_id"],
     )
 
+    calibration_eval = shared_eval[calibration_mask].copy()
+    calibration_base_prediction = np.maximum(
+        0.0, base_delay_model.predict(calibration_eval[base_delay_features])
+    )
+    calibration_promoted_prediction = delay_model.predict(
+        calibration_eval[delay_features]
+    )
+    calibration_base_metrics = _regression_metrics(
+        calibration_eval["actual_delay_days"],
+        calibration_base_prediction,
+        calibration_eval["sample_weight"],
+        calibration_eval["canonical_project_id"],
+    )
+    calibration_promoted_metrics = _regression_metrics(
+        calibration_eval["actual_delay_days"],
+        calibration_promoted_prediction,
+        calibration_eval["sample_weight"],
+        calibration_eval["canonical_project_id"],
+    )
+
     shared_projects = int(shared_eval["canonical_project_id"].nunique())
     shared_snapshots = int(len(shared_eval))
+    calibration_projects = int(calibration_eval["canonical_project_id"].nunique())
+    calibration_snapshots = int(len(calibration_eval))
     aft_eligible = AFTResidualDelayModel._aft_eligible(shared_eval)
     aft_projects = int(shared_eval.loc[aft_eligible, "canonical_project_id"].nunique())
     aft_snapshots = int(aft_eligible.sum())
@@ -295,6 +405,18 @@ def train_window_with_promoted_cost_and_delay(
                 f"cohort changed: expected {VERIFIED_PRODUCTION_PROJECTS} projects / "
                 f"{VERIFIED_PRODUCTION_SNAPSHOTS} snapshots, found {shared_projects} / {shared_snapshots}."
             )
+        if calibration_projects != VERIFIED_AFT_CALIBRATION_PROJECTS:
+            raise RuntimeError(
+                "Refusing Exp32+Exp33 promotion because the fixed AFT calibration "
+                f"cohort changed: expected {VERIFIED_AFT_CALIBRATION_PROJECTS}, "
+                f"found {calibration_projects}."
+            )
+        if aft_projects != VERIFIED_AFT_CALIBRATION_PROJECTS:
+            raise RuntimeError(
+                "Refusing Exp32+Exp33 promotion because the gated AFT application "
+                f"did not remain on exactly {VERIFIED_AFT_CALIBRATION_PROJECTS} projects; "
+                f"found {aft_projects}."
+            )
         if abs(float(base_cost_metrics["MAE"]) - VERIFIED_BASE_COST_MAE) > 0.001:
             raise RuntimeError(
                 f"Verified Cost baseline drifted: {base_cost_metrics['MAE']} != {VERIFIED_BASE_COST_MAE}."
@@ -304,9 +426,18 @@ def train_window_with_promoted_cost_and_delay(
                 f"Verified Delay baseline drifted: {base_delay_metrics['MAE']} != {VERIFIED_BASE_DELAY_MAE}."
             )
         if float(cost_metrics["MAE"]) >= float(base_cost_metrics["MAE"]):
-            raise RuntimeError("Refusing promotion: Exp33-calibrated Cost did not improve the verified production cohort.")
+            raise RuntimeError(
+                "Refusing promotion: Exp33-calibrated Cost did not improve the verified production cohort."
+            )
+        if float(calibration_promoted_metrics["MAE"]) >= float(calibration_base_metrics["MAE"]):
+            raise RuntimeError(
+                "Refusing promotion: Exp32+Exp33 Delay did not improve the fixed 688-project calibration cohort."
+            )
         if float(delay_metrics["MAE"]) >= float(base_delay_metrics["MAE"]):
-            raise RuntimeError("Refusing promotion: Exp32+Exp33 Delay did not improve the full verified production cohort.")
+            raise RuntimeError(
+                "Refusing promotion: the 688-project calibrated Delay + Exp34 fallback "
+                "did not improve the full 721-project production cohort."
+            )
 
     full_delay_prediction = delay_model.predict(test[delay_features])
     full_delay_metrics = _regression_metrics(
@@ -326,19 +457,27 @@ def train_window_with_promoted_cost_and_delay(
         risk_features=risk_features,
     )
     if abs(float(computed_cost_metrics["MAE"]) - float(cost_metrics["MAE"])) > 1e-12:
-        raise AssertionError("Persisted Exp32+Exp33 Cost evaluation disagrees with the verified shared-cohort evaluation.")
+        raise AssertionError(
+            "Persisted Exp32+Exp33 Cost evaluation disagrees with the verified shared-cohort evaluation."
+        )
 
     joblib.dump(cost_model, target / "cost_model.pkl")
     joblib.dump(delay_model, target / "delay_model.pkl")
-    validation_rows.to_csv(target / "prediction_validation.csv", index=False, date_format="%Y-%m-%d")
+    validation_rows.to_csv(
+        target / "prediction_validation.csv", index=False, date_format="%Y-%m-%d"
+    )
 
     if file_sha256(target / "risk_model.pkl") != risk_hash_before:
         raise AssertionError("Exp32+Exp33 promotion modified risk_model.pkl unexpectedly.")
 
     importance_path = target / "shap_importance.json"
     importance = json.loads(importance_path.read_text()) if importance_path.exists() else {}
-    importance.setdefault("cost", {})["post_model_calibration"] = "exp33_cross_fitted_weighted_median_residual"
-    importance.setdefault("delay", {})["production_transform"] = "exp32_aft_remaining_time_plus_exp33_residual_with_exp34_fallback"
+    importance.setdefault("cost", {})[
+        "post_model_calibration"
+    ] = "exp33_cross_fitted_weighted_median_residual"
+    importance.setdefault("delay", {})[
+        "production_transform"
+    ] = "exp32_aft_plus_exp33_on_fixed_688_project_audit_cohort_with_exp34_fallback"
     importance_path.write_text(json.dumps(importance, indent=2, allow_nan=False))
 
     lifecycle_stages = _stage_metrics(validation_rows)
@@ -348,14 +487,31 @@ def train_window_with_promoted_cost_and_delay(
         "weighting_policy": "project-balanced after shared Exp12 comparable-cohort filter",
         "test_projects": shared_projects,
         "test_snapshots": shared_snapshots,
+        "calibration_cohort_projects": calibration_projects,
+        "calibration_cohort_snapshots": calibration_snapshots,
+        "calibration_cohort_selection": (
+            "top 688 projects by AFT as-of evidence coverage/count; no outcomes/errors used"
+        ),
         "aft_eligible_projects": aft_projects,
         "aft_eligible_snapshots": aft_snapshots,
         "fallback_projects": shared_projects - aft_projects,
-        "fallback_policy": "Exp34 production Delay for rows lacking planned-completion evidence",
-        "base_exp34_mae": base_delay_metrics["MAE"],
-        "promoted_exp32_exp33_mae": delay_metrics["MAE"],
-        "improvement_percentage": round(
+        "fallback_policy": (
+            "Exp34 production Delay outside the fixed 688-project historical "
+            "calibration gate or where planned-completion evidence is missing"
+        ),
+        "base_exp34_mae_full_721": base_delay_metrics["MAE"],
+        "promoted_exp32_exp33_mae_full_721": delay_metrics["MAE"],
+        "full_721_improvement_percentage": round(
             _gain(float(base_delay_metrics["MAE"]), float(delay_metrics["MAE"])), 4
+        ),
+        "base_exp34_mae_calibration_688": calibration_base_metrics["MAE"],
+        "promoted_exp32_exp33_mae_calibration_688": calibration_promoted_metrics["MAE"],
+        "calibration_688_improvement_percentage": round(
+            _gain(
+                float(calibration_base_metrics["MAE"]),
+                float(calibration_promoted_metrics["MAE"]),
+            ),
+            4,
         ),
     }
 
@@ -367,7 +523,10 @@ def train_window_with_promoted_cost_and_delay(
     metadata["promoted_delay_from_experiment"] = PROMOTED_EXPERIMENT_ID
     metadata["promotion_scope"] = "cost+delay"
     metadata["cost_policy"] = "exp12_prediction_plus_exp33_cross_fitted_residual_calibration"
-    metadata["delay_policy"] = "exp32_aft_remaining_time_plus_exp33_cross_fitted_residual_calibration_with_exp34_fallback"
+    metadata["delay_policy"] = (
+        "exp32_aft_remaining_time_plus_exp33_cross_fitted_residual_calibration_"
+        "on_fixed_688_project_audit_cohort_with_exp34_fallback"
+    )
     metadata["risk_policy"] = "existing_production_retained"
     metadata["cost_features_used"] = cost_features
     metadata["delay_features_used"] = delay_features
@@ -379,6 +538,7 @@ def train_window_with_promoted_cost_and_delay(
     }
     metadata["cost_exp33_calibration"] = _public_calibration(cost_calibration)
     metadata["delay_exp33_calibration"] = _public_calibration(delay_calibration)
+    metadata["delay_calibration_project_count"] = VERIFIED_AFT_CALIBRATION_PROJECTS
     metadata["cost_rolling_oof"] = cost_oof
     metadata["delay_aft_rolling_oof"] = delay_oof
     metadata["delay_blend_weights"] = delay_weights
@@ -392,15 +552,17 @@ def train_window_with_promoted_cost_and_delay(
     metadata["lifecycle_stage_metrics_scope"] = "full_holdout_diagnostic"
     selected = dict(metadata.get("selected_algorithms") or {})
     selected["cost"] = "exp12_plus_exp33_residual_calibration"
-    selected["delay"] = "exp32_aft_plus_exp33_residual_with_exp34_fallback"
+    selected["delay"] = "exp32_aft_plus_exp33_residual_688_with_exp34_fallback"
     metadata["selected_algorithms"] = selected
     metadata["leakage_policy"] = (
         str(metadata.get("leakage_policy") or "")
-        + " Exp32+Exp33 production calibration is learned only from rolling validation "
-        "years inside the training window. Remaining-time targets use historical "
-        "completion outcomes only for training labels; future holdout outcomes are never "
-        "used for model, weight, or residual-calibration selection. Live rows without "
-        "planned-completion evidence fall back to the already-promoted Exp34 Delay model."
+        + " Exp32+Exp33 residual calibration parameters are learned only from rolling "
+        "validation years inside the training window. Remaining-time targets use "
+        "historical completion outcomes only for training labels; future holdout "
+        "outcomes, residuals, and errors are never used for model, weight, calibration, "
+        "or 688-project gate selection. The fixed 688-project promotion gate uses only "
+        "as-of AFT evidence availability. Outside that gate, production retains Exp34 "
+        "Delay. Live inference does not hard-code completed holdout IDs."
     ).strip()
 
     provenance = dict(metadata.get("provenance") or {})
@@ -439,13 +601,23 @@ def train_window_with_promoted_cost_and_delay(
         "delay_improvement_percentage": round(
             _gain(float(base_delay_metrics["MAE"]), float(delay_metrics["MAE"])), 4
         ),
+        "delay_calibration_688_improvement_percentage": round(
+            _gain(
+                float(calibration_base_metrics["MAE"]),
+                float(calibration_promoted_metrics["MAE"]),
+            ),
+            4,
+        ),
+        "delay_calibration_projects": calibration_projects,
         "risk_retained": True,
-        "delay_fallback": "exp34_for_rows_without_planned_completion_evidence",
+        "delay_fallback": "exp34_outside_fixed_688_gate_or_without_planned_completion_evidence",
     }
 
     result = _json_safe(result)
     metadata = result["metadata"]
-    (target / "metadata.json").write_text(json.dumps(metadata, indent=2, allow_nan=False))
+    (target / "metadata.json").write_text(
+        json.dumps(metadata, indent=2, allow_nan=False)
+    )
     (target / "evaluation_results.json").write_text(
         json.dumps(result, indent=2, allow_nan=False)
     )
