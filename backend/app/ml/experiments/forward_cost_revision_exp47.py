@@ -284,7 +284,9 @@ def _auxiliary_diagnostics(rows: pd.DataFrame, predictions: pd.DataFrame, traini
         "meaningful_revision_threshold_pp": MIN_REVISION_PP,
         "training_rows": int(len(training_pool)),
         "training_projects": int(training_pool.canonical_project_id.nunique()),
-        "observed_revision_events": int(training_pool["auxiliary_next_revision_observed"].sum()),
+        "observed_revision_events": int(
+            training_pool.groupby("canonical_project_id")["exp47_prior_revision_count"].max().sum()
+        ),
         "censored_or_no_next_event_rows": int((training_pool["auxiliary_next_revision_observed"] == 0).sum()),
     }
     mapping = {3: "exp47_revision_probability_3m", 6: "exp47_revision_probability_6m", 12: "exp47_revision_probability_12m"}
