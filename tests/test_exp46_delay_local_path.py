@@ -11,6 +11,7 @@ from backend.app.ml.experiments.delay_local_path_exp46 import (
     FORBIDDEN_INPUTS,
     REUSED_EXP12_DELAY_FEATURES,
     SOURCE_COLUMNS,
+    _diagnostics,
     engineer_local_delay_history,
 )
 from backend.app.ml.experiments.framework import experiment_run_directory
@@ -105,6 +106,22 @@ def test_full_cohort_weights_ledger_and_unchanged_cost_contract():
     production_cost = np.array([9., 9., 21.])
     candidate_cost = production_cost.copy()
     assert np.array_equal(production_cost, candidate_cost)
+
+
+def test_diagnostics_uses_named_columns_not_dataframe_prod_method():
+    rows = pd.DataFrame({
+        "canonical_project_id": ["A", "A", "B"],
+        "actual_delay_days": [100.0, 120.0, 300.0],
+        "production_delay_prediction": [110.0, 140.0, 280.0],
+        "experiment_delay_prediction": [105.0, 125.0, 290.0],
+        "sample_weight": [0.5, 0.5, 1.0],
+        "lifecycle_stage": ["early", "early", "late"],
+    })
+    result = _diagnostics(rows)
+    assert result["median_per_project_mae"]["production"] >= 0
+    assert result["median_per_project_mae"]["experiment"] >= 0
+    assert result["p90_per_project_mae"]["production"] >= 0
+    assert result["p90_per_project_mae"]["experiment"] >= 0
 
 
 def test_adapter_discovery_and_experiment_only_artifact_path():
