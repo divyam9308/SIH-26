@@ -156,7 +156,9 @@ def _canonical_history(history: pd.DataFrame) -> pd.DataFrame:
     frame = frame.dropna(subset=["canonical_project_id", "snapshot_date"])
     # Differing duplicate reports are resolved independently of input order by a
     # deterministic content hash.  One canonical row remains per month/date.
-    hash_frame = frame.reindex(columns=sorted(frame.columns)).astype("string").fillna("<NA>")
+    # Tie-breaking must itself be prediction-time safe: hash only declared as-of
+    # source fields, never labels or completion outcomes carried by the history.
+    hash_frame = frame.reindex(columns=sorted(SOURCE_COLUMNS)).astype("string").fillna("<NA>")
     frame["_exp45_tie"] = pd.util.hash_pandas_object(hash_frame, index=False).to_numpy(np.uint64)
     frame = frame.sort_values(
         ["canonical_project_id", "snapshot_date", "_exp45_tie"], kind="mergesort"
