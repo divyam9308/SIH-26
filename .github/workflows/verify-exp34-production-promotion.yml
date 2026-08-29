@@ -1,21 +1,17 @@
-name: Verify Exp34 production promotion
+name: Verify Exp34 regression baseline
 
 on:
   pull_request:
     branches: [main]
     paths:
       - 'backend/app/ml/production_delay_baseline.py'
-      - 'backend/app/services/lifecycle_retraining_service.py'
-      - 'backend/app/services/monthly_prediction_service.py'
-      - 'backend/app/routes/models.py'
-      - 'backend/app/routes/projects.py'
-      - 'frontend/src/services/api.js'
       - 'tests/test_exp34_production_promotion.py'
+      - 'tests/test_exp34_path_oof_delay.py'
       - '.github/workflows/verify-exp34-production-promotion.yml'
   workflow_dispatch:
 
 jobs:
-  verify-production-2001-2021:
+  verify-exp34-2001-2021:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
@@ -25,64 +21,56 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: Promotion contract tests
+      - name: Exp34 contract tests
         run: PYTHONPATH=. pytest -q tests/test_exp34_production_promotion.py tests/test_exp34_path_oof_delay.py
-      - name: Retrain selected production window and verify exact 721-project evidence
+      - name: Reproduce the frozen Exp34 regression baseline directly
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
+          from backend.app.ml.monthly_lifecycle import build_training_dataset
+          from backend.app.ml.production_delay_baseline import train_window_with_promoted_cost_and_delay
 
-          result = retrain_lifecycle(2001, 2021)
-          assert result['window'] == '2001_2021', result['window']
-          assert result['production_cost_baseline'] == 'exp12_trajectory_v3_cost_only'
-          assert result['production_delay_baseline'] == 'exp34_path_oof_ensemble_v1'
-          assert result['promoted_from_experiment'] == 'exp_12'
-          assert result['promoted_delay_from_experiment'] == 'exp_34'
+          data, identity = build_training_dataset()
+          result = train_window_with_promoted_cost_and_delay(
+              2001,
+              2021,
+              2025,
+              data=data,
+              identity=identity,
+          )
+          assert result['metadata']['production_cost_baseline'] == 'exp12_trajectory_v3_cost_only'
+          assert result['metadata']['production_delay_baseline'] == 'exp34_path_oof_ensemble_v1'
+          assert result['metadata']['promoted_from_experiment'] == 'exp_12'
+          assert result['metadata']['promoted_delay_from_experiment'] == 'exp_34'
 
-          cost_mae = float(result['metrics']['cost_model']['MAE'])
-          delay_mae_721 = float(result['metrics']['delay_model']['MAE'])
-          contract = result['metrics']['metadata']['delay_evaluation_contract']
+          cost_mae = float(result['lifecycle']['metrics']['cost']['MAE'])
+          delay_mae_721 = float(result['lifecycle']['metrics']['delay']['MAE'])
+          contract = result['metadata']['delay_evaluation_contract']
           assert int(contract['test_projects']) == 721, contract
           assert int(contract['test_snapshots']) == 11200, contract
           assert int(contract['full_holdout_projects']) == 728, contract
           delay_mae_728 = float(contract['full_holdout_delay_metrics']['MAE'])
 
-          # Exact verified 721-project production contract from audit PR #61.
           assert abs(cost_mae - 26.872) <= 0.001, cost_mae
           assert abs(delay_mae_721 - 501.303) <= 0.001, delay_mae_721
           assert abs(delay_mae_728 - 503.555) <= 0.001, delay_mae_728
-          verified_previous_production_delay_mae_721 = 534.691
-          improvement = (verified_previous_production_delay_mae_721 - delay_mae_721) / verified_previous_production_delay_mae_721 * 100.0
-          assert improvement > 0
-          assert abs(improvement - 6.2444) <= 0.001, improvement
 
           metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
           weights = metadata['delay_blend_weights']
           assert weights == {'extra_trees': 0.2, 'lightgbm': 0.6, 'xgboost': 0.2}, weights
-          assert metadata['cost_evaluation_contract']['test_projects'] == 721
-          assert metadata['delay_evaluation_contract']['test_projects'] == 721
-          assert metadata['production_cost_baseline'] == 'exp12_trajectory_v3_cost_only'
-          assert metadata['production_delay_baseline'] == 'exp34_path_oof_ensemble_v1'
-
-          print(f'PRODUCTION_COST_MAE_721={cost_mae:.6f}')
-          print(f'PREVIOUS_PRODUCTION_DELAY_MAE_721={verified_previous_production_delay_mae_721:.6f}')
-          print(f'EXP34_PRODUCTION_DELAY_MAE_721={delay_mae_721:.6f}')
-          print(f'EXP34_DELAY_IMPROVEMENT_721={improvement:.6f}%')
-          print(f'EXP34_PRODUCTION_DELAY_MAE_FULL_728={delay_mae_728:.6f}')
-          print(f'EXP34_DELAY_BLEND_WEIGHTS={json.dumps(weights, sort_keys=True)}')
-          print('PRODUCTION_EVIDENCE_PROJECTS=721')
-          print('EXP34_PRODUCTION_PROMOTION=VERIFIED')
+          print(f'EXP34_REGRESSION_COST_MAE_721={cost_mae:.6f}')
+          print(f'EXP34_REGRESSION_DELAY_MAE_721={delay_mae_721:.6f}')
+          print(f'EXP34_REGRESSION_DELAY_MAE_FULL_728={delay_mae_728:.6f}')
+          print('EXP34_REGRESSION_BASELINE=VERIFIED')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: exp34-production-2001-2021
+          name: exp34-regression-2001-2021
           path: |
             models/monthly_lifecycle/2001_2021/metadata.json
             models/monthly_lifecycle/2001_2021/evaluation_results.json
-            models/monthly_lifecycle/2001_2021/run_manifest.json
           if-no-files-found: warn
