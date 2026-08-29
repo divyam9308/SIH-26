@@ -1,0 +1,4 @@
+from backend.app.ml.experiments.quality_fallback_exp60 import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,EXPERIMENT_SEQUENCE,fit_experiment
+def fit_against_production(**kwargs):return fit_experiment(**kwargs)
+def filter_comparable_rows(frame,state):return frame.copy()
+def predict_project(row,state):raise RuntimeError("Exp60 batch-evidence only until promotion")
