@@ -378,13 +378,22 @@ def _route_metrics(rows: pd.DataFrame, production: np.ndarray, candidate: np.nda
 
 def _diagnostics(rows: pd.DataFrame) -> dict:
     work = rows.copy()
-    work["_prod_error"] = (work.production_delay_prediction - work.actual_delay_days).abs()
-    work["_exp_error"] = (work.experiment_delay_prediction - work.actual_delay_days).abs()
+    work["_prod_error"] = (work["production_delay_prediction"] - work["actual_delay_days"]).abs()
+    work["_exp_error"] = (work["experiment_delay_prediction"] - work["actual_delay_days"]).abs()
     project = work.groupby("canonical_project_id").agg(prod=("_prod_error", "mean"), exp=("_exp_error", "mean"))
     result = {
-        "median_per_project_mae": {"production": float(project.prod.median()), "experiment": float(project.exp.median())},
-        "p90_per_project_mae": {"production": float(project.prod.quantile(.9)), "experiment": float(project.exp.quantile(.9))},
-        "absolute_error_p90": {"production": float(work._prod_error.quantile(.9)), "experiment": float(work._exp_error.quantile(.9))},
+        "median_per_project_mae": {
+            "production": float(project["prod"].median()),
+            "experiment": float(project["exp"].median()),
+        },
+        "p90_per_project_mae": {
+            "production": float(project["prod"].quantile(.9)),
+            "experiment": float(project["exp"].quantile(.9)),
+        },
+        "absolute_error_p90": {
+            "production": float(work["_prod_error"].quantile(.9)),
+            "experiment": float(work["_exp_error"].quantile(.9)),
+        },
         "lifecycle_mae": {},
     }
     for stage in ("early", "mid", "late", "very_late"):
@@ -395,8 +404,8 @@ def _diagnostics(rows: pd.DataFrame) -> dict:
             weights = part.sample_weight.to_numpy(float)
             result["lifecycle_mae"][stage] = {
                 "projects": int(part.canonical_project_id.nunique()), "snapshots": int(len(part)),
-                "production_mae": float(np.average(part._prod_error, weights=weights)),
-                "experiment_mae": float(np.average(part._exp_error, weights=weights)),
+                "production_mae": float(np.average(part["_prod_error"], weights=weights)),
+                "experiment_mae": float(np.average(part["_exp_error"], weights=weights)),
             }
     return result
 
@@ -471,7 +480,11 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
     )
     aft_metrics = _route_metrics(scored[route_mask].copy(), production_delay, candidate_delay)
     fallback_metrics = _route_metrics(scored[~route_mask].copy(), production_delay, candidate_delay)
-    if fallback_metrics["production_delay_mae"] != fallback_metrics["experiment_delay_mae"]:
+    fallback_prod = fallback_metrics["production_delay_mae"]
+    fallback_exp = fallback_metrics["experiment_delay_mae"]
+    if fallback_prod is not None and not math.isclose(
+        float(fallback_prod), float(fallback_exp), rel_tol=0.0, abs_tol=1e-9
+    ):
         raise AssertionError("Exp46 fallback metrics are not identical")
 
     run_id = f"exp46-{training_start}-{training_end}-{uuid.uuid4().hex[:10]}"
