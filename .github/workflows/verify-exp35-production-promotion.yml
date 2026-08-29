@@ -11,6 +11,10 @@ on:
       - '.github/workflows/verify-exp35-production-promotion.yml'
   workflow_dispatch:
 
+concurrency:
+  group: verify-exp35-production-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify-production-2001-2021:
     runs-on: ubuntu-latest
@@ -49,8 +53,6 @@ jobs:
           assert int(contract['aft_eligible_projects']) <= 721, contract
           assert int(contract['aft_eligible_snapshots']) <= 11200, contract
 
-          # The promotion trainer itself independently reproduces these baselines
-          # before fitting/accepting Exp32+Exp33.
           previous_cost_mae = 26.872
           previous_delay_mae = 501.303
           assert cost_mae < previous_cost_mae, (cost_mae, previous_cost_mae)
