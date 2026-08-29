@@ -487,6 +487,16 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
     ):
         raise AssertionError("Exp46 fallback metrics are not identical")
 
+    # Production's published 688/33 project split is project-level: 688
+    # projects are admitted to the fixed AFT evidence gate and the remaining
+    # 33 are fallback-only.  Some gated projects still use fallback on
+    # individual snapshots where planned-completion evidence is unavailable,
+    # so counting unique IDs among all fallback *rows* is intentionally larger
+    # and belongs in fallback_route["projects"], not fallback_projects.
+    aft_project_ids = set(scored.loc[route_mask, "canonical_project_id"].astype("string"))
+    all_project_ids = set(scored["canonical_project_id"].astype("string"))
+    fallback_only_projects = len(all_project_ids - aft_project_ids)
+
     run_id = f"exp46-{training_start}-{training_end}-{uuid.uuid4().hex[:10]}"
     window = f"{training_start}_{training_end}"
     ledger = build_prediction_ledger(
@@ -551,8 +561,8 @@ def fit_experiment(*, data, training_start, training_end, test_end, production_b
             "cost_predictions_identical": True,
             "comparison_test_projects": int(compare.canonical_project_id.nunique()),
             "comparison_test_snapshots": int(len(compare)),
-            "aft_projects": int(scored.loc[route_mask, "canonical_project_id"].nunique()),
-            "fallback_projects": int(scored.loc[~route_mask, "canonical_project_id"].nunique()),
+            "aft_projects": len(aft_project_ids),
+            "fallback_projects": fallback_only_projects,
             "aft_snapshots": int(route_mask.sum()), "fallback_snapshots": int((~route_mask).sum()),
             "aft_route": aft_metrics, "fallback_route": fallback_metrics,
             "paired_project_bootstrap": statistics, "diagnostics": _diagnostics(scored),

@@ -88,6 +88,21 @@ def test_routing_depends_on_as_of_evidence_and_gate_not_target_or_error():
     assert AFTResidualDelayModel._aft_eligible(changed_targets).tolist() == mask.tolist()
 
 
+def test_project_level_fallback_count_is_not_any_fallback_row_count():
+    """A gated project can legitimately have early fallback snapshots."""
+    frame = pd.DataFrame({
+        "canonical_project_id": ["A", "A", "B"],
+        "snapshot_date": pd.to_datetime(["2024-01-01", "2024-02-01", "2024-01-01"]),
+        "planned_completion_date": pd.to_datetime([None, "2025-01-01", None]),
+        CALIBRATION_GATE_FEATURE: [True, True, False],
+    })
+    route = AFTResidualDelayModel._aft_eligible(frame)
+    aft_ids = set(frame.loc[route, "canonical_project_id"])
+    all_ids = set(frame["canonical_project_id"])
+    assert frame.loc[~route, "canonical_project_id"].nunique() == 2
+    assert len(all_ids - aft_ids) == 1
+
+
 def test_full_cohort_weights_ledger_and_unchanged_cost_contract():
     rows = pd.DataFrame({
         "canonical_project_id": ["A", "A", "B"],
