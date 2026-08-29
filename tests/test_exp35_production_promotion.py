@@ -136,3 +136,7 @@ def test_production_baseline_names_identify_688_project_combined_promotion():
     assert "exp33" in PRODUCTION_DELAY_BASELINE
     assert "688" in PRODUCTION_DELAY_BASELINE
     assert "exp34_fallback" in PRODUCTION_DELAY_BASELINE
+
+
+# Touch this contract test whenever the dedicated production workflow changes so
+# GitHub runs the latest workflow definition against the exact code to be merged.
