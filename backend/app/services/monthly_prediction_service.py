@@ -108,7 +108,9 @@ def lifecycle_project_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDO
     cost = float(bundle["cost"].predict(cost_X)[0]); delay = max(0.0, float(bundle["delay"].predict(delay_X)[0])); risk = str(bundle["risk"].predict(risk_X)[0])
     importance = bundle["importance"]
     global_factors = [{"feature": item["feature"], "importance": item["importance"]} for item in importance.get("cost", {}).get("features", [])[:8]]
-    local_factors = _shap_factors_for_model(bundle["cost"], latest, cost_features)
+    explain_model = getattr(bundle["cost"], "model", bundle["cost"])
+    explain_features = list(getattr(bundle["cost"], "features", cost_features))
+    local_factors = _shap_factors_for_model(explain_model, latest, explain_features)
     all_features = list(dict.fromkeys(cost_features + delay_features + risk_features))
     inputs = {name: (None if pd.isna(latest.get(name)) else latest.get(name)) for name in all_features}
     for key, value in list(inputs.items()):
@@ -117,6 +119,8 @@ def lifecycle_project_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDO
         elif isinstance(value, pd.Timestamp):
             inputs[key] = value.strftime("%Y-%m-%d")
     provenance = bundle["metadata"].get("provenance") or {}
+    cost_baseline = bundle["metadata"].get("production_cost_baseline")
+    delay_baseline = bundle["metadata"].get("production_delay_baseline")
     return {
         "project_id": code,
         "project_name": latest.project_name,
@@ -130,8 +134,8 @@ def lifecycle_project_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDO
         "cost_features_used": cost_features,
         "delay_features_used": delay_features,
         "risk_features_used": risk_features,
-        "production_cost_baseline": bundle["metadata"].get("production_cost_baseline"),
-        "production_delay_baseline": bundle["metadata"].get("production_delay_baseline"),
+        "production_cost_baseline": cost_baseline,
+        "production_delay_baseline": delay_baseline,
         "promoted_from_experiment": bundle["metadata"].get("promoted_from_experiment"),
         "promoted_delay_from_experiment": bundle["metadata"].get("promoted_delay_from_experiment"),
         "shap_explanation": local_factors,
@@ -142,7 +146,7 @@ def lifecycle_project_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDO
             "dataset_fingerprint": bundle["metadata"].get("dataset_fingerprint") or provenance.get("dataset_fingerprint"),
             "verified": bool(bundle.get("manifest") and bundle["manifest"].get("status") == "complete"),
         },
-        "model_scope": "Official PAIMANA monthly lifecycle production model; Cost uses promoted Exp12 trajectory features, Delay uses promoted Exp34 causal path features plus rolling-OOF ensemble, and Risk retains the existing production contract.",
+        "model_scope": f"Official PAIMANA monthly lifecycle production model; Cost baseline={cost_baseline}; Delay baseline={delay_baseline}; Risk retains the existing production contract.",
     }
 
 
