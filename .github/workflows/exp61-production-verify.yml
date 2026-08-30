@@ -1,0 +1,39 @@
+name: Exp61 production verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/production_exp61_baseline.py'
+      - 'scripts/run_exp61_production_fresh.py'
+      - '.github/workflows/exp61-production-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/production_exp61_baseline.py'
+      - 'scripts/run_exp61_production_fresh.py'
+      - '.github/workflows/exp61-production-verify.yml'
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2019, 2021]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax
+        run: python -m py_compile backend/app/ml/production_exp61_baseline.py scripts/run_exp61_production_fresh.py
+      - name: Fresh production retrain and evaluation
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: python scripts/run_exp61_production_fresh.py --start 2001 --end ${{ matrix.end }} --test-end 2025 --output audit_outputs/exp61_production_2001_${{ matrix.end }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp61-production-2001-${{ matrix.end }}
+          path: audit_outputs/exp61_production_2001_${{ matrix.end }}.json
+          if-no-files-found: error
