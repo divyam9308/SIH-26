@@ -15,3 +15,11 @@ def test_global_isotonic_works_without_stage_column():
     score=pd.DataFrame({"production_prediction":[1.5,3.5,4.5]})
     pred,_=_fit_iso(oof,score,"actual_cost_overrun_percentage",False)
     assert len(pred)==3 and np.isfinite(pred).all()
+
+def test_stage_masks_are_na_safe():
+    n=80
+    stages=pd.Series(["early"]*30+[pd.NA]*20+["late"]*30,dtype="string")
+    oof=pd.DataFrame({"production_prediction":np.linspace(1,80,n),"actual_delay_days":np.linspace(5,120,n),"sample_weight":np.ones(n),"lifecycle_stage":stages})
+    score=pd.DataFrame({"production_prediction":[10,20,30,40],"lifecycle_stage":pd.Series(["early",pd.NA,"late",pd.NA],dtype="string")})
+    pred,_=_fit_iso(oof,score,"actual_delay_days",True)
+    assert len(pred)==4 and np.isfinite(pred).all()
