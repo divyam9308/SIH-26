@@ -1,0 +1,57 @@
+name: Experiment 62 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/post61_common.py'
+      - 'backend/app/ml/experiments/u1_nonlinear_residual_exp62.py'
+      - 'backend/app/ml/experiments/adapter_exp62.py'
+      - 'tests/test_exp62_u1_residual_booster.py'
+      - '.github/workflows/exp62-compare.yml'
+  workflow_dispatch:
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2019, 2021]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/post61_common.py backend/app/ml/experiments/u1_nonlinear_residual_exp62.py backend/app/ml/experiments/adapter_exp62.py
+          PYTHONPATH=. pytest -q tests/test_exp62_u1_residual_booster.py tests/test_experiment_prediction_ledger.py
+      - name: Fresh Exp61 production and Exp62 comparison
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: python -m backend.app.ml.experiments.u1_nonlinear_residual_exp62 --start 2001 --end ${{ matrix.end }} --test-end 2025 --output audit_outputs/exp62_2001_${{ matrix.end }}.json
+      - name: Validate evidence contract
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          end='${{ matrix.end }}'
+          item=json.loads(Path(f'audit_outputs/exp62_2001_{end}.json').read_text())
+          o=item['overall_comparison']; e=item['experiment']
+          assert item['assumed_production']=='Exp61 (PR #96)'
+          assert item['production_artifacts_untouched'] is True
+          if end=='2021':
+              assert o['comparison_test_projects']==721 and o['comparison_test_snapshots']==11200
+          for key in ('production_cost_mae','experiment_cost_mae','production_delay_mae','experiment_delay_mae'):
+              assert math.isfinite(float(o[key]))
+          assert o['execution_verdict']=='EXECUTION VALID'
+          assert e['promotion_allowed'] is False
+          print('EXP62_SCIENTIFIC_VERDICT='+o['scientific_verdict'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp62-2001-${{ matrix.end }}
+          path: |
+            audit_outputs/exp62_2001_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_62/**/*
+          if-no-files-found: error
