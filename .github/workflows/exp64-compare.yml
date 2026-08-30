@@ -1,0 +1,39 @@
+name: Experiment 64 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths: ['backend/app/ml/experiments/post61_common.py','backend/app/ml/experiments/u3_error_risk_gate_exp64.py','backend/app/ml/experiments/adapter_exp64.py','tests/test_exp64_u3_error_gate.py','.github/workflows/exp64-compare.yml']
+  workflow_dispatch:
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy: {fail-fast: false, matrix: {end: [2019, 2021]}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - run: |
+          python -m py_compile backend/app/ml/experiments/post61_common.py backend/app/ml/experiments/u3_error_risk_gate_exp64.py backend/app/ml/experiments/adapter_exp64.py
+          PYTHONPATH=. pytest -q tests/test_exp64_u3_error_gate.py tests/test_experiment_prediction_ledger.py
+      - env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: python -m backend.app.ml.experiments.u3_error_risk_gate_exp64 --start 2001 --end ${{ matrix.end }} --test-end 2025 --output audit_outputs/exp64_2001_${{ matrix.end }}.json
+      - run: |
+          python - <<'PY'
+          import json,math
+          from pathlib import Path
+          end='${{ matrix.end }}';x=json.loads(Path(f'audit_outputs/exp64_2001_{end}.json').read_text());o=x['overall_comparison']
+          assert x['assumed_production']=='Exp61 (PR #96)' and x['production_artifacts_untouched'] is True
+          if end=='2021': assert o['comparison_test_projects']==721 and o['comparison_test_snapshots']==11200
+          assert all(math.isfinite(float(o[k])) for k in ('production_cost_mae','experiment_cost_mae','production_delay_mae','experiment_delay_mae'))
+          assert o['execution_verdict']=='EXECUTION VALID';print('EXP64_SCIENTIFIC_VERDICT='+o['scientific_verdict'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp64-2001-${{ matrix.end }}
+          path: |
+            audit_outputs/exp64_2001_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_64/**/*
+          if-no-files-found: error
