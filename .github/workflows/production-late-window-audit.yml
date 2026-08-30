@@ -1,0 +1,65 @@
+name: One-off production late-window audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/audit_production_late_windows.py'
+      - 'tests/test_audit_production_late_windows.py'
+      - '.github/workflows/production-late-window-audit.yml'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2021, 2022, 2023]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused contract tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/audit_production_late_windows.py
+          PYTHONPATH=. pytest -q tests/test_audit_production_late_windows.py
+      - name: Fresh current-production audit
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python -m backend.app.ml.experiments.audit_production_late_windows
+          --end ${{ matrix.end }}
+          --output audit_outputs/production_2001_${{ matrix.end }}.json
+      - name: Validate requested temporal window and evidence
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          end = int('${{ matrix.end }}')
+          expected_start = {2021: 2022, 2022: 2023, 2023: 2024}[end]
+          item = json.loads(Path(f'audit_outputs/production_2001_{end}.json').read_text())
+          assert item['training_start'] == 2001
+          assert item['training_end'] == end
+          assert item['test_start'] == expected_start
+          assert item['test_end'] == 2025
+          assert item['future_experiment_harness'] is False
+          assert item['production_artifacts_untouched'] is True
+          assert item['observed_test_completion_years']
+          assert min(item['observed_test_completion_years']) >= expected_start
+          assert max(item['observed_test_completion_years']) <= 2025
+          assert item['comparison_test_projects'] > 0
+          assert item['comparison_test_snapshots'] > 0
+          assert math.isfinite(float(item['production_cost_mae']))
+          assert math.isfinite(float(item['production_delay_mae']))
+          print('PRODUCTION_AUDIT_VALID=1')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-audit-2001-${{ matrix.end }}
+          path: audit_outputs/production_2001_${{ matrix.end }}.json
+          if-no-files-found: error
