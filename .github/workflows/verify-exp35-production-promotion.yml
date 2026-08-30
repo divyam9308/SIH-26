@@ -1,4 +1,4 @@
-name: Verify Exp32+Exp33 production promotion
+name: Verify legacy Exp32+Exp33 layer
 
 on:
   pull_request:
@@ -6,19 +6,18 @@ on:
     paths:
       - 'backend/app/ml/production_exp35_baseline.py'
       - 'backend/app/ml/experiments/exp35_aft_residual_combo.py'
-      - 'backend/app/services/lifecycle_retraining_service.py'
       - 'tests/test_exp35_production_promotion.py'
-      - '.github/workflows/verify-exp35-production-promotion.yml'
+      - 'tests/test_exp35_aft_residual_combo.py'
   workflow_dispatch:
 
 concurrency:
-  group: verify-exp35-production-${{ github.event.pull_request.number || github.ref }}
+  group: verify-legacy-exp35-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify-production-2001-2021:
+  legacy-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,75 +25,7 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: Production wrapper contract tests
-        run: PYTHONPATH=. pytest -q tests/test_exp35_production_promotion.py tests/test_exp35_aft_residual_combo.py
-      - name: Retrain selected production window and verify fixed 688-project Delay calibration
-        env:
-          PYTHONPATH: ${{ github.workspace }}
+      - name: Verify legacy Exp32+Exp33 wrapper contracts
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
-
-          result = retrain_lifecycle(2001, 2021)
-          assert result['window'] == '2001_2021', result['window']
-          assert result['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert result['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert result['promoted_from_experiment'] == 'exp_35'
-          assert result['promoted_delay_from_experiment'] == 'exp_35'
-
-          cost_mae = float(result['metrics']['cost_model']['MAE'])
-          delay_mae_721 = float(result['metrics']['delay_model']['MAE'])
-          contract = result['metrics']['metadata']['delay_evaluation_contract']
-          assert int(contract['test_projects']) == 721, contract
-          assert int(contract['test_snapshots']) == 11200, contract
-          assert int(contract['calibration_cohort_projects']) == 688, contract
-          assert int(contract['aft_eligible_projects']) == 688, contract
-          assert int(contract['fallback_projects']) == 33, contract
-          assert int(contract['aft_eligible_snapshots']) <= 11200, contract
-          assert contract['fallback_policy'].startswith('Exp34 production Delay'), contract
-
-          delay_base_688 = float(contract['base_exp34_mae_calibration_688'])
-          delay_exp_688 = float(contract['promoted_exp32_exp33_mae_calibration_688'])
-          delay_gain_688 = float(contract['calibration_688_improvement_percentage'])
-
-          previous_cost_mae = 26.872
-          previous_delay_mae = 501.303
-          assert cost_mae < previous_cost_mae, (cost_mae, previous_cost_mae)
-          assert delay_exp_688 < delay_base_688, (delay_exp_688, delay_base_688)
-          assert delay_mae_721 < previous_delay_mae, (delay_mae_721, previous_delay_mae)
-
-          metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
-          assert metadata['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert metadata['promoted_from_experiment'] == 'exp_35'
-          assert metadata['promoted_delay_from_experiment'] == 'exp_35'
-          assert metadata['risk_policy'] == 'existing_production_retained'
-          assert metadata['delay_calibration_project_count'] == 688
-          assert metadata['delay_evaluation_contract']['test_projects'] == 721
-          assert metadata['delay_evaluation_contract']['calibration_cohort_projects'] == 688
-
-          cost_gain = (previous_cost_mae - cost_mae) / previous_cost_mae * 100.0
-          delay_gain_721 = (previous_delay_mae - delay_mae_721) / previous_delay_mae * 100.0
-          print(f'EXP32_EXP33_PRODUCTION_COST_MAE_721={cost_mae:.6f}')
-          print(f'EXP32_EXP33_PRODUCTION_COST_IMPROVEMENT_721={cost_gain:.6f}%')
-          print(f'EXP34_DELAY_MAE_CALIBRATION_688={delay_base_688:.6f}')
-          print(f'EXP32_EXP33_DELAY_MAE_CALIBRATION_688={delay_exp_688:.6f}')
-          print(f'EXP32_EXP33_DELAY_IMPROVEMENT_CALIBRATION_688={delay_gain_688:.6f}%')
-          print(f'EXP32_EXP33_PRODUCTION_DELAY_MAE_FULL_721={delay_mae_721:.6f}')
-          print(f'EXP32_EXP33_PRODUCTION_DELAY_IMPROVEMENT_FULL_721={delay_gain_721:.6f}%')
-          print(f'AFT_CALIBRATION_PROJECTS={contract["calibration_cohort_projects"]}')
-          print(f'AFT_ELIGIBLE_SNAPSHOTS={contract["aft_eligible_snapshots"]}')
-          print(f'FALLBACK_PROJECTS={contract["fallback_projects"]}')
-          print('EXP32_EXP33_688_PRODUCTION_PROMOTION=VERIFIED')
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: exp32-exp33-production-688-2001-2021
-          path: |
-            models/monthly_lifecycle/2001_2021/metadata.json
-            models/monthly_lifecycle/2001_2021/evaluation_results.json
-            models/monthly_lifecycle/2001_2021/run_manifest.json
-          if-no-files-found: warn
+          python -m py_compile backend/app/ml/production_exp35_baseline.py backend/app/ml/experiments/exp35_aft_residual_combo.py
+          PYTHONPATH=. pytest -q tests/test_exp35_production_promotion.py tests/test_exp35_aft_residual_combo.py
