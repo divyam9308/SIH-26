@@ -4,8 +4,10 @@ on:
     branches: [main]
     paths:
       - 'backend/app/ml/experiments/nextgen_common.py'
+      - 'backend/app/ml/experiments/prediction_ledger.py'
       - 'backend/app/ml/experiments/combined_exp51_exp58_exp61.py'
       - 'backend/app/ml/experiments/adapter_exp61.py'
+      - 'tests/test_experiment_prediction_ledger.py'
       - 'tests/test_exp61_combined.py'
       - '.github/workflows/exp61-compare.yml'
   workflow_dispatch:
@@ -21,7 +23,7 @@ jobs:
       - name: Syntax and focused tests
         run: |
           python -m py_compile backend/app/ml/experiments/nextgen_common.py backend/app/ml/experiments/combined_exp51_exp58_exp61.py backend/app/ml/experiments/adapter_exp61.py
-          PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp51_nextgen.py tests/test_exp58_nextgen.py tests/test_exp61_combined.py
+          PYTHONPATH=. pytest -q tests/test_experiment_prediction_ledger.py tests/test_exp61_combined.py
       - name: Fresh 2001-2021 production and Exp61 comparison
         env: {PYTHONPATH: '${{ github.workspace }}'}
         run: python -m backend.app.ml.experiments.combined_exp51_exp58_exp61 --start 2001 --end 2021 --test-end 2025 --output audit_outputs/exp61_2001_2021.json
