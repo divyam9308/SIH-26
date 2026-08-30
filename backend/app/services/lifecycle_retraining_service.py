@@ -17,7 +17,7 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import OUTCOMES, SNAPSHOTS, SNAPSHOTS_GZ, build_training_dataset
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml.production_cost_baseline import target_feature_contract
-from backend.app.ml.production_exp35_baseline import train_window_with_promoted_cost_and_delay
+from backend.app.ml.production_exp61_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.ml.provenance import artifact_fingerprints, file_sha256
 from backend.app.services import monthly_prediction_service
 
@@ -53,7 +53,6 @@ def _cached_training_data() -> tuple[pd.DataFrame, pd.DataFrame, int, int]:
 
 
 def clear_training_data_cache() -> None:
-    """Allow an explicit data refresh/rebuild process to invalidate this process cache."""
     _cached_training_data.cache_clear()
 
 
@@ -63,17 +62,14 @@ def _training_data() -> tuple[pd.DataFrame, pd.DataFrame, int, int]:
 
 
 def _stamp_production_role(result: dict, target: Path) -> None:
-    """Make the production/experiment boundary explicit in persisted artifacts."""
     metadata = result.get("metadata") or {}
     metadata["model_role"] = "production"
     result["metadata"] = metadata
-
     metadata_path = target / "metadata.json"
     if metadata_path.exists():
         persisted_metadata = json.loads(metadata_path.read_text())
         persisted_metadata["model_role"] = "production"
         metadata_path.write_text(json.dumps(persisted_metadata, indent=2, allow_nan=False))
-
     evaluation_path = target / "evaluation_results.json"
     if evaluation_path.exists():
         evaluation = json.loads(evaluation_path.read_text())
@@ -129,7 +125,6 @@ def _write_run_manifest(start_year: int, end_year: int, result: dict, target: Pa
 
 
 def _publish_staged_run(staged_target: Path, target: Path) -> None:
-    """Replace a model directory only after a staged run is complete."""
     backup = target.parent / f".{target.name}.backup-{uuid.uuid4().hex[:10]}"
     had_previous = target.exists()
     if had_previous:
@@ -146,23 +141,19 @@ def _publish_staged_run(staged_target: Path, target: Path) -> None:
 
 
 def retrain_lifecycle(start_year: int, end_year: int) -> dict:
-    """Retrain and atomically publish the monthly lifecycle model stack."""
     start_year = int(start_year)
     end_year = int(end_year)
     if start_year > end_year:
         raise ValueError("Training start year must be less than or equal to training end year.")
-
     data, identity, min_year, max_year = _training_data()
     if end_year >= max_year:
         raise ValueError(f"Training must end before {max_year} so an unseen future lifecycle holdout remains.")
     if end_year < min_year or start_year > max_year:
         raise ValueError(f"Training range must overlap identity-verified lifecycle data ({min_year}-{max_year}).")
-
     selected_training_years = data.loc[data.completion_year.between(start_year, end_year), "completion_year"].dropna()
     if selected_training_years.empty:
         raise ValueError("The selected period has no identity-verified lifecycle training projects.")
     internal_validation_year = int(selected_training_years.max())
-
     window = f"{start_year}_{end_year}"
     target = MODEL_ROOT / window
     target.mkdir(parents=True, exist_ok=True)
@@ -170,16 +161,8 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     training_marker.write_text(datetime.now(timezone.utc).isoformat())
     staging_root = MODEL_ROOT / ".staging" / f"{window}-{uuid.uuid4().hex}"
     staging_root.mkdir(parents=True, exist_ok=False)
-
     try:
-        result = train_window_with_promoted_cost_and_delay(
-            start_year,
-            end_year,
-            max_year,
-            data=data,
-            identity=identity,
-            artifact_root=staging_root,
-        )
+        result = train_window_with_promoted_cost_and_delay(start_year, end_year, max_year, data=data, identity=identity, artifact_root=staging_root)
         staged_target = staging_root / window
         _stamp_production_role(result, staged_target)
         _write_run_manifest(start_year, end_year, result, staged_target)
@@ -187,7 +170,6 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     finally:
         training_marker.unlink(missing_ok=True)
         shutil.rmtree(staging_root, ignore_errors=True)
-
     metadata = result["metadata"]
     lifecycle = result["lifecycle"]
     lifecycle_metrics = lifecycle["metrics"]
@@ -196,9 +178,7 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     selected = metadata.get("selected_algorithms", {})
     provenance = metadata.get("provenance", {})
     feature_contract = target_feature_contract(metadata)
-
     monthly_prediction_service._bundle.cache_clear()
-
     return {
         "status": "success",
         "model_role": "production",
@@ -223,11 +203,7 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "production_delay_baseline": metadata.get("production_delay_baseline"),
         "promoted_from_experiment": metadata.get("promoted_from_experiment"),
         "promoted_delay_from_experiment": metadata.get("promoted_delay_from_experiment"),
-        "selected_algorithms": {
-            "cost": selected.get("cost"),
-            "delay": selected.get("delay"),
-            "risk": "random_forest",
-        },
+        "selected_algorithms": {"cost": selected.get("cost"), "delay": selected.get("delay"), "risk": "random_forest"},
         "internal_validation_year": internal_validation_year,
         "future_holdout_start": end_year + 1,
         "future_holdout_end": max_year,
@@ -264,5 +240,5 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "lifecycle_stages": lifecycle.get("lifecycle_stages", {}),
         "stage_distribution": lifecycle.get("stage_distribution", {}),
         "balanced_stage_summary": lifecycle.get("balanced_stage_summary", {}),
-        "leakage_guard": "Future holdout projects are excluded from selection/fitting; direct features are same-snapshot, promoted cost trajectory features and Exp34 Delay path features use current/earlier snapshots, Exp32 remaining-time models and Exp33 residual calibrators use only rolling folds inside the training period, future holdout outcomes are excluded from all model/weight/calibration selection, and rows without planned-completion evidence retain the Exp34 Delay fallback.",
+        "leakage_guard": "Future holdout projects are excluded from selection/fitting; Exp61 Cost shrinkage uses rolling training-only OOF residuals; Exp58 hierarchical Delay priors use strictly earlier completion years for training and frozen training-population priors for future inference; current Exp32 AFT routing and Exp34 fallback remain in place; Risk is unchanged.",
     }
