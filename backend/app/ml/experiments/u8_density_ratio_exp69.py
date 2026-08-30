@@ -20,18 +20,29 @@ CHANGED_DIMENSION="recent_training_covariate_density_ratio_weights"
 DENSITY_FEATURES=["approved_cost_cr","duration_ratio","cost_escalation_percentage","schedule_slippage_days","expenditure_ratio","progress_deviation"]
 
 
+def _training_only_impute(frame: pd.DataFrame):
+    out=frame.copy();medians={}
+    for c in out.columns:
+        s=pd.to_numeric(out[c],errors="coerce").replace([np.inf,-np.inf],np.nan)
+        finite=s[np.isfinite(s.to_numpy(float))]
+        median=float(finite.median()) if len(finite) else 0.0
+        if not np.isfinite(median): median=0.0
+        medians[c]=median;out[c]=s.fillna(median).astype(float)
+    return out,medians
+
+
 def density_project_weights(train: pd.DataFrame, training_end: int):
     ordered=train.sort_values(["canonical_project_id","snapshot_date"],kind="mergesort");latest=ordered.groupby("canonical_project_id",as_index=False).tail(1).copy();cols=[c for c in DENSITY_FEATURES if c in latest]
-    x=pd.DataFrame({c:pd.to_numeric(latest[c],errors="coerce") for c in cols});med=x.median();x=x.fillna(med);label=(pd.to_numeric(latest["completion_year"],errors="coerce")>=training_end-3).astype(int).to_numpy();prior=float(label.mean())
-    if len(np.unique(label))<2 or not cols:
+    raw=pd.DataFrame({c:pd.to_numeric(latest[c],errors="coerce") for c in cols});x,medians=_training_only_impute(raw);label=(pd.to_numeric(latest["completion_year"],errors="coerce")>=training_end-3).astype(int).to_numpy();prior=float(label.mean())
+    if len(np.unique(label))<2 or not cols or prior<=0.0 or prior>=1.0:
         weight=np.ones(len(latest),float)
     else:
-        scaler=StandardScaler().fit(x);model=LogisticRegression(C=.5,max_iter=1000,random_state=6901).fit(scaler.transform(x),label);p=np.clip(model.predict_proba(scaler.transform(x))[:,1],.02,.98);odds=p/(1-p);prior_odds=prior/(1-prior);weight=np.clip(odds/prior_odds,.25,4.0)
-    mapping=dict(zip(latest["canonical_project_id"].astype("string"),weight));return mapping,{"features":cols,"recent_year_start":training_end-3,"recent_project_share":prior,"min_weight":float(np.min(weight)),"max_weight":float(np.max(weight)),"mean_weight":float(np.mean(weight)),"clip":[.25,4.0],"future_holdout_used":False}
+        scaler=StandardScaler().fit(x);xt=scaler.transform(x);model=LogisticRegression(C=.5,max_iter=1000,random_state=6901).fit(xt,label);p=np.clip(model.predict_proba(xt)[:,1],.02,.98);odds=p/(1-p);prior_odds=prior/(1-prior);weight=np.clip(odds/prior_odds,.25,4.0)
+    mapping=dict(zip(latest["canonical_project_id"].astype("string"),weight));return mapping,{"features":cols,"training_medians":medians,"recent_year_start":training_end-3,"recent_project_share":prior,"min_weight":float(np.min(weight)),"max_weight":float(np.max(weight)),"mean_weight":float(np.mean(weight)),"clip":[.25,4.0],"future_holdout_used":False}
 
 
 def _apply_weights(frame,mapping):
-    out=frame.copy();ratio=out["canonical_project_id"].astype("string").map(mapping).fillna(1.0).to_numpy(float);out["sample_weight"]=pd.to_numeric(out["sample_weight"],errors="coerce").fillna(0).to_numpy(float)*ratio;return out
+    out=frame.copy();ratio=out["canonical_project_id"].astype("string").map(mapping).fillna(1.0).to_numpy(float);out["sample_weight"]=pd.to_numeric(out["sample_weight"],errors="coerce").replace([np.inf,-np.inf],np.nan).fillna(0).to_numpy(float)*ratio;return out
 
 
 def fit_experiment(*,data,production_bundle,training_start,training_end,test_end,**kwargs):
@@ -41,6 +52,6 @@ def fit_experiment(*,data,production_bundle,training_start,training_end,test_end
     dfeat=list(dm.model_features);td=_remaining_frame(weighted_prior);dcal,_=_delay_aft_calibration_oof(td,dfeat,dm.weights);models=_fit_aft_family_models(td,dfeat);ed=pdly.copy();elig=AFTResidualDelayModel._aft_eligible(c).to_numpy(bool)
     if elig.any():
         pos=np.flatnonzero(elig);sub=c.iloc[pos];rem=_aft_remaining_prediction(models,dm.weights,sub,dfeat);draw=_delay_from_remaining(sub,rem);ed[pos]=np.maximum(0,draw+_corrections(sub,draw,dcal))
-    return _persist(EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,CHANGED_DIMENSION,c,pc,ec,pdly,ed,{"baseline":"assumed Exp61 production from PR #96","density_ratio":details,"fallback_delay_retained":True})
+    return _persist(EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,CHANGED_DIMENSION,c,pc,ec,pdly,ed,{"baseline":"current production (Exp61)","density_ratio":details,"fallback_delay_retained":True})
 
 if __name__=="__main__":run_cli(sys.modules[__name__])
