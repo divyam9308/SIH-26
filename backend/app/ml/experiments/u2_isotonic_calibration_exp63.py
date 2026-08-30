@@ -25,6 +25,7 @@ def _fit_iso(oof: pd.DataFrame, score: pd.DataFrame, actual: str, nonnegative: b
     out=np.asarray(global_iso.predict(sx),float)
     stage_details={}
     if "lifecycle_stage" in oof and "lifecycle_stage" in score:
+        score_stage=score["lifecycle_stage"].astype("string")
         for stage,part in oof.loc[mask].groupby("lifecycle_stage",dropna=False):
             key="<NA>" if pd.isna(stage) else str(stage)
             px=pd.to_numeric(part["production_prediction"],errors="coerce").to_numpy(float)
@@ -36,8 +37,11 @@ def _fit_iso(oof: pd.DataFrame, score: pd.DataFrame, actual: str, nonnegative: b
                 continue
             local=IsotonicRegression(increasing=True,out_of_bounds="clip",y_min=0.0 if nonnegative else None)
             local.fit(px[good],py[good],sample_weight=pw[good])
-            smask=score["lifecycle_stage"].isna().to_numpy() if pd.isna(stage) else score["lifecycle_stage"].astype("string").eq(str(stage)).to_numpy()
-            if smask.any():
+            if pd.isna(stage):
+                smask=score_stage.isna().to_numpy(dtype=bool)
+            else:
+                smask=score_stage.eq(str(stage)).fillna(False).to_numpy(dtype=bool)
+            if bool(smask.any()):
                 alpha=support/(support+STRENGTH)
                 lp=np.asarray(local.predict(sx[smask]),float)
                 out[smask]=alpha*lp+(1-alpha)*out[smask]
@@ -52,6 +56,6 @@ def fit_experiment(*,data,production_bundle,training_start,training_end,test_end
     ec,cd=_fit_iso(coof,cs,"actual_cost_overrun_percentage",False)
     doof=delay_oof_frame(data,production_bundle,training_start,training_end,test_end); ds=cohort.copy();ds["production_prediction"]=pdly
     ed,dd=_fit_iso(doof,ds,"actual_delay_days",True)
-    return _persist(EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,CHANGED_DIMENSION,cohort,pc,ec,pdly,ed,{"baseline":"assumed Exp61 production from PR #96","cost":cd,"delay":dd})
+    return _persist(EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,CHANGED_DIMENSION,cohort,pc,ec,pdly,ed,{"baseline":"current production (Exp61)","cost":cd,"delay":dd})
 
 if __name__=="__main__": run_cli(sys.modules[__name__])
