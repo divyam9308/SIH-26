@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp88_multihorizon_delay_features import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=88
+promotion_allowed=False

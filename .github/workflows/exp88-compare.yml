@@ -1,0 +1,27 @@
+name: Experiment 88 comparison
+on:
+  pull_request:
+    branches: [main]
+    paths: ['backend/app/ml/experiments/post_u1_delay_common.py','backend/app/ml/experiments/exp88_multihorizon_delay_features.py','backend/app/ml/experiments/adapter_exp88.py','tests/test_exp88_multihorizon_delay_features.py','.github/workflows/exp88-compare.yml']
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy: {fail-fast: false, matrix: {end: [2019, 2021]}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m py_compile backend/app/ml/experiments/post_u1_delay_common.py backend/app/ml/experiments/exp88_multihorizon_delay_features.py && PYTHONPATH=. pytest -q tests/test_exp88_multihorizon_delay_features.py
+      - run: python -m backend.app.ml.experiments.exp88_multihorizon_delay_features --end ${{ matrix.end }} --output audit_outputs/exp88_2001_${{ matrix.end }}.json
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+      - name: Validate evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          e=int('${{ matrix.end }}');x=json.loads(Path(f'audit_outputs/exp88_2001_{e}.json').read_text());assert (x['comparison_test_projects'],x['comparison_test_snapshots'])=={2019:(949,14847),2021:(721,11200)}[e];assert x['cost_predictions_identical'] and not x['holdout_used_for_selection'];assert x['execution_verdict']=='EXECUTION VALID'
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: 'exp88-2001-${{ matrix.end }}', path: 'audit_outputs/exp88_2001_${{ matrix.end }}.json', if-no-files-found: error}
