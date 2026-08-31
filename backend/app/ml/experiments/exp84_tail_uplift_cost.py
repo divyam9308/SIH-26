@@ -14,7 +14,7 @@ def fit_experiment(training_end,output):
     if label.min()==label.max():
         prob=np.zeros(len(score),float);magnitude=0.0
     else:
-        model=make_pipeline(StandardScaler(),LogisticRegression(C=.1,max_iter=500,random_state=8401));model.fit(xo,label,sample_weight=w);prob=model.predict_proba(xs)[:,1];magnitude=max(0.0,_wq(r[label==1],w[label==1],.5))
+        model=make_pipeline(StandardScaler(),LogisticRegression(C=.1,max_iter=500,random_state=8401));model.fit(xo,label,logisticregression__sample_weight=w);prob=model.predict_proba(xs)[:,1];magnitude=max(0.0,_wq(r[label==1],w[label==1],.5))
     active=prob>=GATE;corr=np.where(active,SCALE*prob*magnitude,0.0);pred=ctx['production_cost']+corr;details={'features':cols,'medians':med,'training_positive_residual_threshold':thr,'gate_probability':GATE,'correction_scale':SCALE,'positive_residual_median':magnitude,'activation_snapshots':int(active.sum()),'activation_fraction':float(active.mean()),'correction_is_positive_only':True};return persist(EXPERIMENT_ID,EXPERIMENT_NAME,ctx,pred,details,output)
 
 def main():
