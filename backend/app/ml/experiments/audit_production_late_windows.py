@@ -3,6 +3,11 @@
 This is intentionally not a reusable experiment adapter. It freshly retrains the
 current Exp61 production stack in an isolated temporary artifact root and reports
 Cost/Delay MAE for three fixed windows only.
+
+The frozen production promotion uses a 688-project historical AFT gate. Later
+holdouts can contain fewer AFT-evidence projects, so this one-off audit keeps the
+verified 688 gate when it is available and otherwise evaluates every project
+with valid AFT as-of evidence. The production modules themselves are unchanged.
 """
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import argparse
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -17,11 +23,8 @@ from backend.app.ml.experiments.nextgen_common import _hash_prod, _prepare, norm
 from backend.app.ml.monthly_lifecycle import build_training_dataset
 from backend.app.ml.monthly_training import _json_safe, temporal_project_split
 from backend.app.ml.production_cost_baseline import _production_cost_evaluation_rows
-from backend.app.ml.production_exp61_baseline import (
-    PRODUCTION_COST_BASELINE,
-    PRODUCTION_DELAY_BASELINE,
-    train_window_with_promoted_cost_and_delay,
-)
+import backend.app.ml.production_exp35_baseline as exp35_production
+import backend.app.ml.production_exp61_baseline as exp61_production
 
 TRAINING_START = 2001
 TEST_END = 2025
@@ -30,12 +33,41 @@ WINDOWS = {
     2022: (2023, 2025),
     2023: (2024, 2025),
 }
+PRODUCTION_COST_BASELINE = exp61_production.PRODUCTION_COST_BASELINE
+PRODUCTION_DELAY_BASELINE = exp61_production.PRODUCTION_DELAY_BASELINE
+_PRODUCTION_AFT_SELECTOR = exp35_production._select_aft_calibration_projects
 
 
 def window_contract(training_end: int) -> tuple[int, int]:
     if training_end not in WINDOWS:
         raise ValueError(f"Supported one-off audit cutoffs are {sorted(WINDOWS)}")
     return WINDOWS[training_end]
+
+
+def select_aft_projects_for_one_off_audit(
+    frame: pd.DataFrame,
+    limit: int = exp35_production.VERIFIED_AFT_CALIBRATION_PROJECTS,
+) -> set[str]:
+    """Use the verified gate when possible, else every AFT-evidence project."""
+    try:
+        return _PRODUCTION_AFT_SELECTOR(frame, limit)
+    except RuntimeError as exc:
+        if "AFT evidence" not in str(exc) or "cannot form the requested" not in str(exc):
+            raise
+        required = {"canonical_project_id", "snapshot_date", "planned_completion_date"}
+        missing = sorted(required.difference(frame.columns))
+        if missing:
+            raise ValueError("AFT audit selection missing: " + ", ".join(missing))
+        eligible = exp35_production.AFTResidualDelayModel._aft_eligible(frame)
+        selected = set(
+            frame.loc[eligible, "canonical_project_id"]
+            .astype("string")
+            .dropna()
+            .tolist()
+        )
+        if not selected:
+            raise
+        return selected
 
 
 def run_audit(training_end: int) -> dict:
@@ -59,14 +91,25 @@ def run_audit(training_end: int) -> dict:
 
     with tempfile.TemporaryDirectory(prefix=f"production-audit-{training_end}-") as td:
         root = Path(td) / "production"
-        receipt = train_window_with_promoted_cost_and_delay(
-            TRAINING_START,
-            training_end,
-            TEST_END,
-            data=data,
-            identity=identity,
-            artifact_root=root,
-        )
+        # Audit-only override. Both modules refer to the same historical selector,
+        # so patch both names for the duration of this isolated training call.
+        with patch.object(
+            exp35_production,
+            "_select_aft_calibration_projects",
+            select_aft_projects_for_one_off_audit,
+        ), patch.object(
+            exp61_production,
+            "_select_aft_calibration_projects",
+            select_aft_projects_for_one_off_audit,
+        ):
+            receipt = exp61_production.train_window_with_promoted_cost_and_delay(
+                TRAINING_START,
+                training_end,
+                TEST_END,
+                data=data,
+                identity=identity,
+                artifact_root=root,
+            )
 
     if before != _hash_prod():
         raise AssertionError("One-off audit modified tracked production artifacts")
@@ -89,6 +132,7 @@ def run_audit(training_end: int) -> dict:
         "production_delay_mae": delay_mae,
         "comparison_test_projects": int(cohort["canonical_project_id"].nunique()),
         "comparison_test_snapshots": int(len(cohort)),
+        "aft_gate_policy": "verified_688_when_available_else_all_available_aft_evidence_projects",
         "production_artifacts_untouched": True,
         "future_experiment_harness": False,
     }
