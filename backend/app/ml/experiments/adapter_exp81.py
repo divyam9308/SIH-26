@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp81_delay_informed_cost import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=81
+promotion_allowed=False
