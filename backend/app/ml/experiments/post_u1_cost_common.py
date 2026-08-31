@@ -91,9 +91,9 @@ def fit_residual_booster(oof,score,features,seed):
     return corr,{'selected_scale':scale,'features':cols,'medians':med,'cap':cap,'meta_oof_years':years[1:]}
 
 def prepare_context(end,engineer=None):
-    test_start,test_end,projects,snapshots=window_contract(end);data=build_training_dataset();before=_hash_prod()
+    test_start,test_end,projects,snapshots=window_contract(end);data,identity=build_training_dataset();before=_hash_prod()
     with tempfile.TemporaryDirectory(prefix=f'exp-cost-{end}-') as td:
-        root=Path(td)/'models';train_current_production(2001,end,test_end,data=data,artifact_root=root);target=root/f'2001_{end}';cm=joblib.load(target/'cost_model.pkl');dm=joblib.load(target/'delay_model.pkl')
+        root=Path(td)/'models';train_current_production(2001,end,test_end,data=data,identity=identity,artifact_root=root);target=root/f'2001_{end}';cm=joblib.load(target/'cost_model.pkl');dm=joblib.load(target/'delay_model.pkl')
         prepared=normalize_taxonomy(_prepare(data));prepared=engineer(prepared) if engineer else prepared;train,test=temporal_project_split(prepared,2001,end,test_end);train,test,_=_build_temporal_delay_priors(train,test)
         cohort=_production_cost_evaluation_rows(test).copy();ids=_select_aft_calibration_projects(cohort);cohort[CALIBRATION_GATE_FEATURE]=cohort['canonical_project_id'].astype('string').isin(ids);cohort=assign_project_balanced_weights(cohort)
         if cohort['canonical_project_id'].nunique()!=projects or len(cohort)!=snapshots: raise RuntimeError('Comparison cohort changed')
