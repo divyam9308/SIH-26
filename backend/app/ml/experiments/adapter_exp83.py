@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp83_bagged_cost_residual import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=83
+promotion_allowed=False
