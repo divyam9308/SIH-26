@@ -41,11 +41,25 @@ def forward_folds(frame,max_folds=8):
     return list(reversed(out))
 
 def _family_disagreement(models,weights,frame,features):
+    """Std-dev of family Delay predictions without invoking the full-family combiner.
+
+    ``_aft_remaining_prediction`` always iterates the repository-wide FAMILIES
+    constant, so passing it a one-model dict raises KeyError for the other
+    families. For disagreement we intentionally score each fitted family alone:
+    model.predict returns log1p(remaining_days), which is converted back exactly
+    before the normal remaining->Delay conversion.
+    """
     if not len(frame): return np.zeros(0,float)
     arr=[]
-    for name,model in models.items():
-        rem=_aft_remaining_prediction({name:model},{name:1.0},frame,features);arr.append(_delay_from_remaining(frame,rem))
-    return np.std(np.vstack(arr),axis=0) if arr else np.zeros(len(frame),float)
+    for _name,model in models.items():
+        log_remaining=np.asarray(model.predict(frame[features]),float)
+        remaining=np.maximum(0.0,np.expm1(np.clip(log_remaining,-20,20)))
+        arr.append(_delay_from_remaining(frame,remaining))
+    if not arr: return np.zeros(len(frame),float)
+    stacked=np.vstack(arr)
+    if stacked.shape[1]!=len(frame) or not np.isfinite(stacked).all():
+        raise AssertionError('AFT family disagreement produced invalid predictions')
+    return np.std(stacked,axis=0)
 
 def _base_oof(train,u1_model):
     if not hasattr(u1_model,'base_model'): raise TypeError('Post-PR110 U1 Delay wrapper required')
