@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp87_tail_specialist_delay import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=87
+promotion_allowed=False
