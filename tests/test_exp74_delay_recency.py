@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 import backend.app.ml.experiments.recency_delay_exp74 as exp74
+import backend.app.ml.experiments.recency_delay_exp74_runtime as exp74_runtime
 
 
 def _oof_frame():
@@ -109,3 +110,26 @@ def test_oof_selection_is_conservative_when_all_corrections_are_equal(monkeypatc
     assert selected["selected_policy"]["name"] == "full_history_control"
     assert selected["selected_recency_blend_weight"] == 0.0
     assert selected["selected_production_blend_weight"] == 1.0
+
+
+def test_exp74_runtime_builds_more_than_production_three_fold_cap():
+    rows = []
+    for year in range(2005, 2022):
+        for i in range(4):
+            rows.append(
+                {
+                    "completion_year": year,
+                    "canonical_project_id": f"{year}-P{i}",
+                }
+            )
+    frame = pd.DataFrame(rows)
+    folds = exp74_runtime._forward_base_folds(frame)
+    assert exp74_runtime.EXPANDED_BASE_OOF_FOLDS > 3
+    assert len(folds) == exp74_runtime.EXPANDED_BASE_OOF_FOLDS
+    years = [year for _, _, year in folds]
+    assert years == sorted(years)
+    assert len(years) >= exp74.SELECTION_FOLDS + 1
+
+
+def test_exp74_runtime_installs_corrected_current_production_oof_builder():
+    assert exp74._current_production_oof is exp74_runtime._current_production_oof
