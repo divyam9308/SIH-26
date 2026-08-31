@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp84_tail_uplift_cost import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=84
+promotion_allowed=False
