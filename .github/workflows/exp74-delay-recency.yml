@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'backend/app/ml/experiments/recency_delay_exp74.py'
+      - 'backend/app/ml/experiments/recency_delay_exp74_runtime.py'
       - 'backend/app/ml/experiments/adapter_exp74.py'
       - 'tests/test_exp74_delay_recency.py'
       - '.github/workflows/exp74-delay-recency.yml'
@@ -27,13 +28,13 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Syntax and focused contract tests
         run: |
-          python -m py_compile backend/app/ml/experiments/recency_delay_exp74.py backend/app/ml/experiments/adapter_exp74.py
+          python -m py_compile backend/app/ml/experiments/recency_delay_exp74.py backend/app/ml/experiments/recency_delay_exp74_runtime.py backend/app/ml/experiments/adapter_exp74.py
           PYTHONPATH=. pytest -q tests/test_exp74_delay_recency.py tests/test_experiment_prediction_ledger.py
       - name: Fresh post-PR110 production vs Exp74
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: >-
-          python -m backend.app.ml.experiments.recency_delay_exp74
+          python -m backend.app.ml.experiments.recency_delay_exp74_runtime
           --start 2001
           --end ${{ matrix.end }}
           --test-end 2025
