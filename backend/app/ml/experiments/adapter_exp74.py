@@ -1,5 +1,5 @@
 """Discovery adapter for isolated Experiment 74."""
-from backend.app.ml.experiments.recency_delay_exp74 import (
+from backend.app.ml.experiments.recency_delay_exp74_runtime import (
     EXPERIMENT_ID,
     EXPERIMENT_NAME,
     EXPERIMENT_SCOPE,
