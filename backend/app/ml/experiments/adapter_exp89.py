@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp89_lifecycle_u1_scale import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=89
+promotion_allowed=False
