@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp80_revision_shock_cost import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=80
+promotion_allowed=False
