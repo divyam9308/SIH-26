@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp86_aft_disagreement_delay import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=86
+promotion_allowed=False
