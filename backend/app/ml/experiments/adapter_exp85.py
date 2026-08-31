@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp85_revision_shock_delay import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=85
+promotion_allowed=False
