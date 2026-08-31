@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp82_lifecycle_adaptive_cost_calibration import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,fit_experiment
+EXPERIMENT_SEQUENCE=82
+promotion_allowed=False
