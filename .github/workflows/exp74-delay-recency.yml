@@ -1,0 +1,97 @@
+name: Experiment 74 Delay recency adaptation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/recency_delay_exp74.py'
+      - 'backend/app/ml/experiments/adapter_exp74.py'
+      - 'tests/test_exp74_delay_recency.py'
+      - '.github/workflows/exp74-delay-recency.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2019, 2021, 2022, 2023]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax and focused contract tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/recency_delay_exp74.py backend/app/ml/experiments/adapter_exp74.py
+          PYTHONPATH=. pytest -q tests/test_exp74_delay_recency.py tests/test_experiment_prediction_ledger.py
+      - name: Fresh post-PR110 production vs Exp74
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python -m backend.app.ml.experiments.recency_delay_exp74
+          --start 2001
+          --end ${{ matrix.end }}
+          --test-end 2025
+          --output audit_outputs/exp74_2001_${{ matrix.end }}.json
+      - name: Validate temporal evidence and isolation
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+
+          end = int('${{ matrix.end }}')
+          expected = {
+              2019: (2020, 949, 14847),
+              2021: (2022, 721, 11200),
+              2022: (2023, 487, 6870),
+              2023: (2024, 212, 3123),
+          }
+          test_start, projects, snapshots = expected[end]
+          item = json.loads(Path(f'audit_outputs/exp74_2001_{end}.json').read_text())
+          overall = item['overall_comparison']
+          details = item['experiment']['details']
+          selection = details['selection']
+
+          assert item['assumed_production'] == 'post-PR110 U1 Delay production'
+          assert item['test_start'] == test_start and item['test_end'] == 2025
+          assert item['production_artifacts_untouched'] is True
+          assert overall['comparison_test_projects'] == projects
+          assert overall['comparison_test_snapshots'] == snapshots
+          assert abs(float(overall['production_cost_mae']) - float(overall['experiment_cost_mae'])) < 1e-12
+          assert float(overall['cost_improvement_percentage']) == 0.0
+          assert math.isfinite(float(overall['production_delay_mae']))
+          assert math.isfinite(float(overall['experiment_delay_mae']))
+          assert overall['execution_verdict'] == 'EXECUTION VALID'
+          assert details['cost_predictions_identical'] is True
+          assert details['holdout_used_for_policy_selection'] is False
+          assert details['holdout_used_for_blend_selection'] is False
+          assert selection['holdout_used_for_selection'] is False
+          assert max(selection['selection_years']) <= end
+          assert selection['selected_policy']['name'] in {
+              'full_history_control', 'rolling_15y', 'rolling_10y', 'rolling_7y',
+              'rolling_5y', 'decay_hl_3y', 'decay_hl_5y', 'decay_hl_8y', 'decay_hl_12y'
+          }
+          assert float(selection['selected_recency_blend_weight']) in {0.0, 0.25, 0.5, 0.75, 1.0}
+          if end in (2022, 2023):
+              assert details['later_cutoffs_are_robustness_only'] is True
+          else:
+              assert details['later_cutoffs_are_robustness_only'] is False
+
+          print('EXP74_SELECTED_POLICY=' + selection['selected_policy']['name'])
+          print('EXP74_SELECTED_RECENCY_BLEND_WEIGHT=' + str(selection['selected_recency_blend_weight']))
+          print('EXP74_DELAY_IMPROVEMENT_PERCENT=' + str(overall['delay_improvement_percentage']))
+          print('EXP74_SCIENTIFIC_VERDICT=' + overall['scientific_verdict'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp74-2001-${{ matrix.end }}
+          path: |
+            audit_outputs/exp74_2001_${{ matrix.end }}.json
+            models/monthly_lifecycle/experiments/exp_74/**/*
+          if-no-files-found: error
