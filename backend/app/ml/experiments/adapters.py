@@ -1,9 +1,14 @@
-"""Discovery contract for experiment-vs-production comparison adapters.
+"""Discovery contract for interactive experiment-vs-production adapters.
 
-The comparison harness deliberately contains no experiment implementation.
-Experiment PRs opt in by adding a module named ``adapter_exp*.py`` under
-``backend.app.ml.experiments``.  The highest sequence number becomes the default
-challenger, while callers may still request a specific registered experiment.
+Batch experiment PRs may keep files named ``adapter_exp*.py`` for workflow-local
+compatibility, but they are not automatically exposed through the lifecycle
+comparison catalog. A module is registered here only when it explicitly sets
+``INTERACTIVE_ADAPTER = True``.
+
+This keeps offline scientific experiments independent from the single-project
+interactive prediction contract. Batch workflows can continue importing their
+experiment implementation directly and can report production-vs-experiment MAE
+without becoming selectable application challengers.
 """
 from __future__ import annotations
 
@@ -55,7 +60,10 @@ def discover_experiment_adapters() -> list[ExperimentAdapter]:
     for item in pkgutil.iter_modules(package.__path__):
         if not item.name.startswith("adapter_exp"):
             continue
-        adapter = _validate(importlib.import_module(f"{PACKAGE}.{item.name}"))
+        module = importlib.import_module(f"{PACKAGE}.{item.name}")
+        if getattr(module, "INTERACTIVE_ADAPTER", False) is not True:
+            continue
+        adapter = _validate(module)
         if adapter.experiment_id in seen:
             raise ValueError(f"Duplicate experiment adapter id: {adapter.experiment_id}")
         seen.add(adapter.experiment_id)
@@ -75,10 +83,10 @@ def default_experiment_adapter() -> ExperimentAdapter | None:
 def get_experiment_adapter(experiment_id: str | None = None) -> ExperimentAdapter:
     adapters = discover_experiment_adapters()
     if not adapters:
-        raise ValueError("No experiment comparison adapter is installed. Merge an experiment PR first.")
+        raise ValueError("No interactive experiment comparison adapter is installed.")
     if experiment_id in (None, ""):
         return adapters[-1]
     for adapter in adapters:
         if adapter.experiment_id == experiment_id:
             return adapter
-    raise ValueError(f"Unknown experiment adapter '{experiment_id}'.")
+    raise ValueError(f"Unknown interactive experiment adapter '{experiment_id}'.")
