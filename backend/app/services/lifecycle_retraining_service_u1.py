@@ -1,7 +1,8 @@
-"""Live lifecycle retraining routed through the U1 Delay production stack.
+"""Live lifecycle retraining routed through the Exp105 Cost + Exp113 Delay stack.
 
 This keeps the existing atomic publication/provenance helpers from the standard
-lifecycle retraining service, but uses the Delay-only U1 production trainer.
+lifecycle retraining service, but uses the selected production trainer:
+Exp105 for Cost and Exp113 for Delay on top of the existing Exp61 + U1 stack.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import uuid
 
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml.production_cost_baseline import target_feature_contract
-from backend.app.ml.production_u1_delay_baseline import train_window_with_promoted_cost_and_delay
+from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.services import lifecycle_retraining_service as base
 from backend.app.services import monthly_prediction_service
 
@@ -88,6 +89,7 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "production_cost_baseline": metadata.get("production_cost_baseline"),
         "production_delay_baseline": metadata.get("production_delay_baseline"),
         "promoted_from_experiment": metadata.get("promoted_from_experiment"),
+        "promoted_cost_from_experiment": metadata.get("promoted_cost_from_experiment"),
         "promoted_delay_from_experiment": metadata.get("promoted_delay_from_experiment"),
         "selected_algorithms": {
             "cost": selected.get("cost"),
@@ -133,8 +135,8 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
         "stage_distribution": lifecycle.get("stage_distribution", {}),
         "balanced_stage_summary": lifecycle.get("balanced_stage_summary", {}),
         "leakage_guard": (
-            "Future holdout projects are excluded from selection/fitting; Exp61 Cost remains unchanged; "
-            "Exp58 hierarchical Delay priors remain in the base Delay path; U1 adds only a bounded residual "
-            "correction fitted from rolling training-only OOF errors; Risk is unchanged."
+            "Future holdout projects are excluded from fitting and selection. Exp105 Cost uses only "
+            "forward training OOF factor/residual evidence; Exp113 Delay uses only forward training OOF "
+            "quantile-AFT/residual evidence on top of the existing Exp61 + U1 Delay anchor. Risk is unchanged."
         ),
     }
