@@ -29,7 +29,12 @@ class ExperimentAdapter:
     module: ModuleType
 
     def public_metadata(self) -> dict:
-        return {"experiment_id": self.experiment_id, "sequence": self.sequence, "name": self.name, "scope": self.scope}
+        return {
+            "experiment_id": self.experiment_id,
+            "sequence": self.sequence,
+            "name": self.name,
+            "scope": self.scope,
+        }
 
 
 def _validate(module: ModuleType) -> ExperimentAdapter:
@@ -39,10 +44,23 @@ def _validate(module: ModuleType) -> ExperimentAdapter:
     missing += [name for name in required_calls if not callable(getattr(module, name, None))]
     if missing:
         raise ValueError(f"Invalid experiment adapter {module.__name__}; missing: {', '.join(sorted(missing))}")
-    return ExperimentAdapter(str(module.EXPERIMENT_ID), int(module.EXPERIMENT_SEQUENCE), str(module.EXPERIMENT_NAME), str(module.EXPERIMENT_SCOPE), module)
+    return ExperimentAdapter(
+        experiment_id=str(module.EXPERIMENT_ID),
+        sequence=int(module.EXPERIMENT_SEQUENCE),
+        name=str(module.EXPERIMENT_NAME),
+        scope=str(module.EXPERIMENT_SCOPE),
+        module=module,
+    )
 
 
 def discover_experiment_adapters() -> list[ExperimentAdapter]:
+    """Return only experiments explicitly opting into interactive prediction.
+
+    Merely naming a module ``adapter_exp*.py`` is not sufficient. This is
+    intentional: most research PRs are batch evidence generators whose GitHub
+    workflows compare Cost/Delay MAE over frozen evaluation windows and do not
+    implement safe one-project-at-a-time inference.
+    """
     package = importlib.import_module(PACKAGE)
     adapters: list[ExperimentAdapter] = []
     seen: set[str] = set()
