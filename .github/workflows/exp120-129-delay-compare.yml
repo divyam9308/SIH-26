@@ -1,0 +1,49 @@
+name: Exp120-129 Delay comparison
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/exp12*_delay.py'
+      - 'backend/app/ml/experiments/post_exp113_delay_common.py'
+      - 'backend/app/ml/experiments/run_exp120_129.py'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    name: compare (${{ matrix.end }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2021, 2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Resolve experiment number
+        shell: bash
+        run: |
+          EXP=$(echo "${GITHUB_HEAD_REF}" | sed -E 's/^experiment-([0-9]+).*/\1/')
+          if ! [[ "$EXP" =~ ^12[0-9]$ ]]; then echo "Invalid experiment branch: ${GITHUB_HEAD_REF}"; exit 1; fi
+          echo "EXP=$EXP" >> "$GITHUB_ENV"
+      - name: Syntax check
+        run: |
+          python -m py_compile backend/app/ml/experiments/post_exp113_delay_common.py backend/app/ml/experiments/run_exp120_129.py backend/app/ml/experiments/exp${EXP}_delay.py
+      - name: Fresh production-vs-experiment comparison
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: >-
+          python -m backend.app.ml.experiments.run_exp120_129
+          --exp ${EXP}
+          --end ${{ matrix.end }}
+          --output audit_outputs/exp${EXP}_2001_${{ matrix.end }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp${{ env.EXP }}-2001-${{ matrix.end }}
+          path: audit_outputs/exp${{ env.EXP }}_2001_${{ matrix.end }}.json
+          if-no-files-found: error
