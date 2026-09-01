@@ -1,0 +1,13 @@
+"""Exp99: sanction-vintage accumulated price-pressure Cost features."""
+from __future__ import annotations
+import argparse,numpy as np,pandas as pd
+from backend.app.ml.experiments.post_u1_cost_common import current_cost_oof,fit_residual_booster,persist,prepare_context,window_contract
+EXPERIMENT_ID='exp_99';EXPERIMENT_NAME='Sanction-vintage inflation-burden proxy';EXPERIMENT_SCOPE='cost';EXPERIMENT_SEQUENCE=99
+
+def _engineer(frame):
+    x=frame.copy();x['snapshot_date']=pd.to_datetime(x['snapshot_date'],errors='coerce');x['approval_date']=pd.to_datetime(x.get('approval_date'),errors='coerce');x['_month']=x['snapshot_date'].dt.to_period('M').dt.to_timestamp();x=x.sort_values(['canonical_project_id','snapshot_date']);esc=pd.to_numeric(x['cost_escalation_percentage'],errors='coerce');x['_esc_change']=esc.groupby(x['canonical_project_id']).diff();m=x.groupby(['sector','_month'],dropna=False)['_esc_change'].median().rename('_pressure').reset_index().sort_values(['sector','_month']);m['exp99_sector_pressure_12m']=m.groupby('sector')['_pressure'].transform(lambda s:s.shift(1).rolling(12,min_periods=1).mean());x=x.merge(m[['sector','_month','exp99_sector_pressure_12m']],on=['sector','_month'],how='left',sort=False);age=((x['snapshot_date']-x['approval_date']).dt.days/365.25).clip(lower=0);x['exp99_sanction_age_years']=age;x['exp99_vintage_burden']=age*pd.to_numeric(x['exp99_sector_pressure_12m'],errors='coerce');x['exp99_old_vintage']=age.ge(8).astype(float);x['exp99_very_old_vintage']=age.ge(12).astype(float);approved=pd.to_numeric(x['approved_cost_cr'],errors='coerce');x['exp99_size_vintage_burden']=np.log1p(approved.clip(lower=0))*x['exp99_vintage_burden'];return x.drop(columns=['_month','_esc_change'],errors='ignore')
+def fit_experiment(training_end,output):
+    window_contract(training_end);ctx=prepare_context(training_end,engineer=_engineer);oof=current_cost_oof(ctx['train'],ctx['cost_model']);score=ctx['cohort'].copy();score['production_prediction']=ctx['production_cost'];features=['production_prediction','exp99_sector_pressure_12m','exp99_sanction_age_years','exp99_vintage_burden','exp99_old_vintage','exp99_very_old_vintage','exp99_size_vintage_burden','duration_ratio','cost_escalation_percentage'];corr,meta=fit_residual_booster(oof,score,features,9901);meta['external_wpi_used']=False;meta['burden']='sanction age multiplied by lagged sector price-pressure proxy';return persist(EXPERIMENT_ID,EXPERIMENT_NAME,ctx,ctx['production_cost']+corr,meta,output)
+def main():
+    p=argparse.ArgumentParser();p.add_argument('--end',type=int,choices=[2019,2021],required=True);p.add_argument('--output',required=True);a=p.parse_args();fit_experiment(a.end,a.output)
+if __name__=='__main__': main()
