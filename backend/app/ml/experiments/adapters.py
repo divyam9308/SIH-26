@@ -54,7 +54,13 @@ def _validate(module: ModuleType) -> ExperimentAdapter:
 
 
 def discover_experiment_adapters() -> list[ExperimentAdapter]:
-    """Return only experiments explicitly opting into interactive prediction."""
+    """Return only experiments explicitly opting into interactive prediction.
+
+    Merely naming a module ``adapter_exp*.py`` is not sufficient. This is
+    intentional: most research PRs are batch evidence generators whose GitHub
+    workflows compare Cost/Delay MAE over frozen evaluation windows and do not
+    implement safe one-project-at-a-time inference.
+    """
     package = importlib.import_module(PACKAGE)
     adapters: list[ExperimentAdapter] = []
     seen: set[str] = set()
