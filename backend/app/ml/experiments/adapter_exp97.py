@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp97_agency_portfolio_shock_cost import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,EXPERIMENT_SEQUENCE,fit_experiment
+PROMOTION_ALLOWED=False
+scope=EXPERIMENT_SCOPE
