@@ -1,0 +1,3 @@
+from backend.app.ml.experiments.exp103_type_size_stage_cost_priors import EXPERIMENT_ID,EXPERIMENT_NAME,EXPERIMENT_SCOPE,EXPERIMENT_SEQUENCE,fit_experiment
+PROMOTION_ALLOWED=False
+scope=EXPERIMENT_SCOPE
