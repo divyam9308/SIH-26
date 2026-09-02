@@ -1,0 +1,59 @@
+name: Apply evidence router refactor
+
+on:
+  push:
+    branches:
+      - refactor/evidence-based-cohort-aft-routing
+    paths:
+      - 'scripts/apply_evidence_router_refactor.py'
+      - '.github/workflows/apply-evidence-router-refactor.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    if: github.ref == 'refs/heads/refactor/evidence-based-cohort-aft-routing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/evidence-based-cohort-aft-routing
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Apply deterministic refactor
+        run: python scripts/apply_evidence_router_refactor.py
+      - name: Diff and syntax checks
+        run: |
+          git diff --check
+          python -m py_compile \
+            backend/app/ml/production_delay_baseline.py \
+            backend/app/ml/production_exp35_baseline.py \
+            backend/app/ml/production_exp61_baseline.py \
+            backend/app/ml/production_u1_delay_baseline.py \
+            backend/app/ml/production_exp105_exp113_baseline.py \
+            backend/app/ml/experiments/post_exp113_delay_common.py \
+            scripts/run_u1_delay_production_fresh.py
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Focused contract tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest -q \
+            tests/test_exp35_production_promotion.py \
+            tests/test_production_u1_delay.py \
+            tests/test_production_exp105_exp113.py
+      - name: Commit refactor and remove temporary helper
+        run: |
+          rm scripts/apply_evidence_router_refactor.py
+          rm .github/workflows/apply-evidence-router-refactor.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Refactor production cohort and AFT routing to evidence rules"
+          git push origin HEAD:refactor/evidence-based-cohort-aft-routing
