@@ -1,6 +1,8 @@
 """Shared leakage-safe harness for post-Exp113 Delay experiments 120-129."""
 from __future__ import annotations
-import json,tempfile
+import json,os,tempfile
+from concurrent.futures import ProcessPoolExecutor,as_completed
+from multiprocessing import get_context
 from pathlib import Path
 import joblib,numpy as np,pandas as pd
 from lightgbm import LGBMRegressor
@@ -39,18 +41,64 @@ def prepare_context(end):
         if int(cohort['canonical_project_id'].nunique())!=projects or len(cohort)!=snapshots: raise RuntimeError('Comparison cohort changed')
         pc=np.asarray(cm.predict(cohort),float);pdly=np.maximum(0,np.asarray(dm.predict(cohort),float))
     return dict(training_end=end,test_start=test_start,test_end=test_end,train=train,cohort=cohort,cost_model=cm,delay_model=dm,production_cost=pc,production_delay=pdly,full_data=data,identity=identity)
+_OOF_WORKER_DATA=None
+_OOF_WORKER_IDENTITY=None
+
+def _init_oof_worker(data,identity):
+    global _OOF_WORKER_DATA,_OOF_WORKER_IDENTITY
+    _OOF_WORKER_DATA=data;_OOF_WORKER_IDENTITY=identity
+
+def _production_oof_fold(val,year,data=None,identity=None):
+    source_data=_OOF_WORKER_DATA if data is None else data
+    source_identity=_OOF_WORKER_IDENTITY if identity is None else identity
+    if source_data is None or source_identity is None: raise RuntimeError('Production OOF worker was not initialized')
+    train_end=int(year)-1
+    with tempfile.TemporaryDirectory(prefix=f'prod-oof-{year}-') as td:
+        root=Path(td)/'models'
+        train_current_production(2001,train_end,int(year),data=source_data,identity=source_identity,artifact_root=root)
+        dm=joblib.load(root/f'2001_{train_end}'/'delay_model.pkl')
+        prediction=np.maximum(0,np.asarray(dm.predict(val),float))
+    part=val.copy();part['production_prediction']=prediction;part['residual']=pd.to_numeric(part['actual_delay_days'],errors='coerce').to_numpy(float)-prediction;part['oof_year']=int(year)
+    return part
+
 def production_oof(ctx,max_folds=6):
-    parts=[];data=ctx['train']
-    for fit,val,year in forward_folds(data,max_folds):
-        train_end=int(year)-1
-        if train_end<2005: continue
-        try:
-            with tempfile.TemporaryDirectory(prefix=f'prod-oof-{year}-') as td:
-                root=Path(td)/'models';train_current_production(2001,train_end,int(year),data=ctx['full_data'],identity=ctx['identity'],artifact_root=root);dm=joblib.load(root/f'2001_{train_end}'/'delay_model.pkl');p=np.maximum(0,np.asarray(dm.predict(val),float))
-        except Exception:
-            continue
-        part=val.copy();part['production_prediction']=p;part['residual']=pd.to_numeric(part['actual_delay_days'],errors='coerce').to_numpy(float)-p;part['oof_year']=int(year);parts.append(part)
-    if len(parts)<2: raise ValueError('Need >=2 strict forward production OOF folds')
+    data=ctx['train'];folds=[(val,int(year)) for _,val,year in forward_folds(data,max_folds) if int(year)-1>=2005]
+    requested=int(os.environ.get('POST_EXP113_OOF_WORKERS','1'))
+    workers=max(1,min(requested,len(folds),4));parts=[];errors=[]
+    if workers==1:
+        for val,year in folds:
+            try:
+                parts.append(_production_oof_fold(val,year,ctx['full_data'],ctx['identity']))
+                print(f'PRODUCTION_OOF_FOLD_COMPLETED={year}',flush=True)
+            except Exception as exc:
+                errors.append(f'{year}: {type(exc).__name__}: {exc}')
+                print(f'PRODUCTION_OOF_FOLD_FAILED={errors[-1]}',flush=True)
+    else:
+        threads=max(1,min(int(os.environ.get('POST_EXP113_THREADS_PER_WORKER','2')),4))
+        for variable in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS'):
+            os.environ[variable]=str(threads)
+        os.environ['LOKY_MAX_CPU_COUNT']=str(threads)
+        print(f'PRODUCTION_OOF_PARALLEL_WORKERS={workers}; THREADS_PER_WORKER={threads}',flush=True)
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=get_context('spawn'),
+            initializer=_init_oof_worker,
+            initargs=(ctx['full_data'],ctx['identity']),
+        ) as pool:
+            pending={pool.submit(_production_oof_fold,val,year):year for val,year in folds}
+            for future in as_completed(pending):
+                year=pending[future]
+                try:
+                    parts.append(future.result())
+                    print(f'PRODUCTION_OOF_FOLD_COMPLETED={year}',flush=True)
+                except Exception as exc:
+                    errors.append(f'{year}: {type(exc).__name__}: {exc}')
+                    print(f'PRODUCTION_OOF_FOLD_FAILED={errors[-1]}',flush=True)
+    if len(parts)<2:
+        detail='; '.join(errors) if errors else 'no eligible folds'
+        raise ValueError(f'Need >=2 strict forward production OOF folds; completed={len(parts)}; failures={detail}')
+    if errors: print(f'PRODUCTION_OOF_PARTIAL_FAILURES={"; ".join(errors)}',flush=True)
+    parts.sort(key=lambda frame:int(frame['oof_year'].iloc[0]))
     return pd.concat(parts,ignore_index=True)
 def fit_residual(oof,score,features,seed,extra_weight=None,monotone=None):
     yc=pd.to_numeric(oof['oof_year'],errors='coerce');years=sorted(int(x) for x in yc.dropna().unique());meta=[]
