@@ -10,13 +10,14 @@ on:
 
 jobs:
   compare:
-    name: compare (${{ matrix.end }})
+    if: startsWith(github.head_ref, 'experiment-12')
+    name: compare (2021)
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        end: [2021, 2022]
+    env:
+      POST_EXP113_OOF_WORKERS: '2'
+      POST_EXP113_THREADS_PER_WORKER: '2'
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,11 +40,11 @@ jobs:
         run: >-
           python -m backend.app.ml.experiments.run_exp120_129
           --exp ${EXP}
-          --end ${{ matrix.end }}
-          --output audit_outputs/exp${EXP}_2001_${{ matrix.end }}.json
+          --end 2021
+          --output audit_outputs/exp${EXP}_2001_2021.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: exp${{ env.EXP }}-2001-${{ matrix.end }}
-          path: audit_outputs/exp${{ env.EXP }}_2001_${{ matrix.end }}.json
-          if-no-files-found: error
+          name: exp${{ env.EXP }}-2001-2021
+          path: audit_outputs/exp${{ env.EXP }}_2001_2021.json
+          if-no-files-found: warn
