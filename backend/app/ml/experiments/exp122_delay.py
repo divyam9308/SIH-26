@@ -18,3 +18,4 @@ def fit_experiment(end,output):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--end',type=int,choices=[2021,2022],required=True);p.add_argument('--output',required=True);a=p.parse_args();fit_experiment(a.end,a.output)
 if __name__=='__main__':main()
+# Comparison refreshed after shared timeout fix #173.
