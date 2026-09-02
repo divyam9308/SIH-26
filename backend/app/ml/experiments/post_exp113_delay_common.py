@@ -74,7 +74,11 @@ def production_oof(ctx,max_folds=6):
                 errors.append(f'{year}: {type(exc).__name__}: {exc}')
                 print(f'PRODUCTION_OOF_FOLD_FAILED={errors[-1]}',flush=True)
     else:
-        print(f'PRODUCTION_OOF_PARALLEL_WORKERS={workers}',flush=True)
+        threads=max(1,min(int(os.environ.get('POST_EXP113_THREADS_PER_WORKER','2')),4))
+        for variable in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS'):
+            os.environ[variable]=str(threads)
+        os.environ['LOKY_MAX_CPU_COUNT']=str(threads)
+        print(f'PRODUCTION_OOF_PARALLEL_WORKERS={workers}; THREADS_PER_WORKER={threads}',flush=True)
         with ProcessPoolExecutor(
             max_workers=workers,
             mp_context=get_context('spawn'),
