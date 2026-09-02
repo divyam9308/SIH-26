@@ -1,0 +1,56 @@
+name: Experiment A Delay comparison
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/experiment_a_delay_execution_clock.py'
+      - 'tests/test_experiment_a_delay_execution_clock.py'
+      - '.github/workflows/experiment-a-delay.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      POST_EXP113_OOF_WORKERS: '2'
+      POST_EXP113_THREADS_PER_WORKER: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Focused tests
+        run: |
+          python -m py_compile backend/app/ml/experiments/experiment_a_delay_execution_clock.py
+          pytest -q tests/test_experiment_a_delay_execution_clock.py
+      - name: Run primary 2001-2021 comparison
+        run: |
+          mkdir -p audit_outputs
+          python -m backend.app.ml.experiments.experiment_a_delay_execution_clock \
+            --end 2021 \
+            --output audit_outputs/experiment_a_2001_2021.json
+      - name: Validate evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('audit_outputs/experiment_a_2001_2021.json').read_text())
+          assert x['experiment_id']=='exp_a'
+          assert x['comparison_test_projects']==721
+          assert x['comparison_test_snapshots']==11200
+          assert x['cost_predictions_identical'] is True
+          assert x['holdout_used_for_selection'] is False
+          assert x['execution_verdict']=='EXECUTION VALID'
+          print(json.dumps(x,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiment-a-delay-2001-2021
+          path: audit_outputs/experiment_a_2001_2021.json
+          if-no-files-found: warn
