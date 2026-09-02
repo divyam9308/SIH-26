@@ -16,11 +16,8 @@ jobs:
     timeout-minutes: 360
     env:
       POST_EXP113_OOF_WORKERS: '2'
+      POST_EXP113_THREADS_PER_WORKER: '2'
       PYTHONUNBUFFERED: '1'
-      OMP_NUM_THREADS: '1'
-      OPENBLAS_NUM_THREADS: '1'
-      MKL_NUM_THREADS: '1'
-      NUMEXPR_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
