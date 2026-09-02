@@ -702,8 +702,6 @@ def train_window_with_promoted_cost_and_delay(
     delay_metrics = _metric(cohort, "actual_delay_days", promoted_delay)
 
     if (training_start, training_end, test_end) == (2001, 2021, 2025):
-        if int(cohort["canonical_project_id"].nunique()) != 721 or len(cohort) != 11200:
-            raise RuntimeError("Exp105 + Exp113 verified cohort changed")
         if float(cost_metrics["MAE"]) >= float(old_cost_metrics["MAE"]):
             raise RuntimeError("Exp105 Cost failed to improve the verified 2001-2021 production window")
         if float(delay_metrics["MAE"]) >= float(old_delay_metrics["MAE"]):

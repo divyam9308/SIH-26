@@ -229,10 +229,9 @@ def train_window_with_promoted_cost_and_delay(
     cost_metrics = metric("actual_cost_overrun_percentage", new_cost_prediction)
     delay_metrics = metric("actual_delay_days", new_delay_prediction)
 
-    # Promotion was selected on 2001-2021 only; require that frozen decision window to reproduce an improvement.
+    # The reference decision window still has performance guards, but its cohort
+    # size is whatever the evidence rule yields rather than a hard-coded count.
     if (training_start, training_end, test_end) == (2001, 2021, 2025):
-        if int(shared_eval["canonical_project_id"].nunique()) != 721 or len(shared_eval) != 11200:
-            raise RuntimeError("Exp61 verified 2001-2021 cohort changed")
         if float(cost_metrics["MAE"]) >= float(old_cost_metrics["MAE"]):
             raise RuntimeError("Exp61 Cost failed to improve the verified production window")
         if float(delay_metrics["MAE"]) >= float(old_delay_metrics["MAE"]):

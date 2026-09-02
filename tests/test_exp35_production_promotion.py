@@ -8,7 +8,6 @@ from backend.app.ml.production_exp35_baseline import (
     ResidualCalibratedCostModel,
     PRODUCTION_COST_BASELINE,
     PRODUCTION_DELAY_BASELINE,
-    VERIFIED_AFT_CALIBRATION_PROJECTS,
     _select_aft_calibration_projects,
 )
 
@@ -106,13 +105,14 @@ def test_missing_historical_gate_does_not_disable_live_aft():
     np.testing.assert_allclose(model.predict(frame), [6.0])
 
 
-def test_aft_calibration_cohort_selection_is_fixed_and_evidence_only():
+def _routing_fixture():
     rows = []
     for project, eligible, total in [
         ("A", 3, 3),
         ("B", 2, 2),
         ("C", 2, 3),
         ("D", 1, 3),
+        ("E", 0, 2),
     ]:
         for i in range(total):
             rows.append(
@@ -120,21 +120,28 @@ def test_aft_calibration_cohort_selection_is_fixed_and_evidence_only():
                     "canonical_project_id": project,
                     "snapshot_date": f"2020-01-{i + 1:02d}",
                     "planned_completion_date": "2020-02-01" if i < eligible else None,
-                    # These deliberately extreme target-like columns must not affect selection.
                     "actual_delay_days": 10000 if project == "D" else 0,
                 }
             )
-    frame = pd.DataFrame(rows)
-    selected = _select_aft_calibration_projects(frame, limit=2)
+    return pd.DataFrame(rows)
+
+
+def test_aft_routing_selects_all_projects_with_as_of_evidence_by_default():
+    selected = _select_aft_calibration_projects(_routing_fixture())
+    assert selected == {"A", "B", "C", "D"}
+
+
+def test_aft_routing_supports_explicit_legacy_limit_without_using_targets():
+    selected = _select_aft_calibration_projects(_routing_fixture(), limit=2)
     assert selected == {"A", "B"}
 
 
-def test_production_baseline_names_identify_688_project_combined_promotion():
-    assert VERIFIED_AFT_CALIBRATION_PROJECTS == 688
+def test_production_baseline_names_identify_evidence_router_and_fallback():
     assert "exp33" in PRODUCTION_COST_BASELINE
     assert "exp32" in PRODUCTION_DELAY_BASELINE
     assert "exp33" in PRODUCTION_DELAY_BASELINE
-    assert "688" in PRODUCTION_DELAY_BASELINE
+    assert "evidence_router" in PRODUCTION_DELAY_BASELINE
+    assert "688" not in PRODUCTION_DELAY_BASELINE
     assert "exp34_fallback" in PRODUCTION_DELAY_BASELINE
 
 

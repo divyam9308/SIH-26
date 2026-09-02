@@ -296,8 +296,6 @@ def train_window_with_promoted_cost_and_delay(
     delay_metrics = _metric(shared_eval, "actual_delay_days", promoted_delay)
 
     if (training_start, training_end, test_end) == (2001, 2021, 2025):
-        if int(shared_eval["canonical_project_id"].nunique()) != 721 or len(shared_eval) != 11200:
-            raise RuntimeError("U1 Delay promotion verified cohort changed")
         if float(delay_metrics["MAE"]) >= float(old_delay_metrics["MAE"]):
             raise RuntimeError("U1 Delay failed to improve the verified 2001-2021 production window")
 
