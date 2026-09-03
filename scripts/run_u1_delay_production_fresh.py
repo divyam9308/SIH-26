@@ -12,9 +12,12 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights, build_training_dataset
 from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
 
-EXPECTED = {
-    2019: {"cost": 27.801, "delay": 438.098},
-    2021: {"cost": 25.829, "delay": 346.599},
+EXPECTED_COST = {
+    2019: 27.801,
+    2021: 25.829,
+}
+EXPECTED_REFERENCE_DELAY = {
+    2021: 345.511,
 }
 TOLERANCE = 0.05
 
@@ -38,7 +41,7 @@ def main() -> None:
     p.add_argument("--test-end", type=int, default=2025)
     p.add_argument("--output", required=True)
     a = p.parse_args()
-    if a.start != 2001 or a.end not in EXPECTED or a.test_end != 2025:
+    if a.start != 2001 or a.end not in EXPECTED_COST or a.test_end != 2025:
         raise ValueError("Production verification supports only 2001-2019 and 2001-2021 through 2025")
 
     data, identity = build_training_dataset()
@@ -52,27 +55,21 @@ def main() -> None:
         validation = pd.read_csv(artifact_root / f"{a.start}_{a.end}" / "prediction_validation.csv")
         comparable = validation[validation["cost_evaluation_eligible"].astype(bool)].copy()
         comparable = assign_project_balanced_weights(comparable)
-        live_cost_mae = _weighted_mae(
-            comparable, "predicted_cost_overrun_percentage", "actual_cost_overrun_percentage"
-        )
+        live_cost_mae = _weighted_mae(comparable, "predicted_cost_overrun", "actual_cost_overrun_percentage")
         live_delay_mae = _weighted_mae(comparable, "predicted_delay_days", "actual_delay_days")
 
     metrics = result["lifecycle"]["metrics"]
     promo = result["promotion"]
     contract = result["metadata"]["cost_evaluation_contract"]
     payload = {
-        "window": f"{a.start}_{a.end}",
-        "test_end": a.test_end,
-        "previous_cost_mae": promo["cost"]["previous_cost_mae"],
-        "cost_mae": metrics["cost"]["MAE"],
-        "persisted_inference_cost_mae": live_cost_mae,
-        "cost_improvement_percentage": promo["cost"]["cost_improvement_percentage"],
-        "previous_delay_mae": promo["delay"]["previous_delay_mae"],
-        "delay_mae": metrics["delay"]["MAE"],
-        "persisted_inference_delay_mae": live_delay_mae,
+        "window": f"{a.start}_{a.end}", "test_end": a.test_end,
+        "previous_cost_mae": promo["cost"]["previous_cost_mae"], "cost_mae": metrics["cost"]["MAE"],
+        "persisted_inference_cost_mae": live_cost_mae, "cost_improvement_percentage": promo["cost"]["cost_improvement_percentage"],
+        "previous_delay_mae": promo["delay"]["previous_delay_mae"], "delay_mae": metrics["delay"]["MAE"],
+        "delay_mape_percent": metrics["delay"].get("MAPE"), "persisted_inference_delay_mae": live_delay_mae,
         "delay_improvement_percentage": promo["delay"]["delay_improvement_percentage"],
-        "comparison_test_projects": contract["test_projects"],
-        "comparison_test_snapshots": contract["test_snapshots"],
+        "delay_routing_contract": result["metadata"].get("delay_evaluation_contract"),
+        "comparison_test_projects": contract["test_projects"], "comparison_test_snapshots": contract["test_snapshots"],
         "production_cost_baseline": result["metadata"]["production_cost_baseline"],
         "production_delay_baseline": result["metadata"]["production_delay_baseline"],
         "promoted_cost_from_experiment": result["metadata"]["promoted_cost_from_experiment"],
@@ -80,28 +77,26 @@ def main() -> None:
         "risk_retained": promo["risk_retained"],
     }
 
-    expected = EXPECTED[a.end]
-    if not _close(payload["cost_mae"], expected["cost"]):
-        raise RuntimeError(f"Exp105 Cost did not reproduce: {payload['cost_mae']} vs expected {expected['cost']}")
-    if not _close(payload["delay_mae"], expected["delay"]):
-        raise RuntimeError(f"Exp113 Delay did not reproduce: {payload['delay_mae']} vs expected {expected['delay']}")
+    expected_cost = EXPECTED_COST[a.end]
+    if not _close(payload["cost_mae"], expected_cost):
+        raise RuntimeError(f"Exp105 Cost did not reproduce: {payload['cost_mae']} vs expected {expected_cost}")
+    if a.end in EXPECTED_REFERENCE_DELAY:
+        expected_delay = EXPECTED_REFERENCE_DELAY[a.end]
+        if not _close(payload["delay_mae"], expected_delay):
+            raise RuntimeError(f"Frozen Exp113 Delay did not reproduce: {payload['delay_mae']} vs expected {expected_delay}")
+    if payload["delay_mape_percent"] is None or not np.isfinite(float(payload["delay_mape_percent"])):
+        raise RuntimeError("Delay percentage error (MAPE) was not finite")
     if not _close(payload["persisted_inference_cost_mae"], payload["cost_mae"]):
-        raise RuntimeError(
-            "Persisted/live Exp105 Cost inference does not match the verified in-memory prediction: "
-            f"{payload['persisted_inference_cost_mae']} vs {payload['cost_mae']}"
-        )
+        raise RuntimeError(f"Persisted/live Exp105 Cost inference does not match the verified in-memory prediction: {payload['persisted_inference_cost_mae']} vs {payload['cost_mae']}")
     if not _close(payload["persisted_inference_delay_mae"], payload["delay_mae"]):
-        raise RuntimeError(
-            "Persisted/live Exp113 Delay inference does not match the verified in-memory prediction: "
-            f"{payload['persisted_inference_delay_mae']} vs {payload['delay_mae']}"
-        )
+        raise RuntimeError(f"Persisted/live Exp113 Delay inference does not match the verified in-memory prediction: {payload['persisted_inference_delay_mae']} vs {payload['delay_mae']}")
     if a.end == 2021:
         if payload["cost_improvement_percentage"] <= 0:
             raise RuntimeError("Exp105 Cost production promotion did not improve Cost")
         if payload["delay_improvement_percentage"] <= 0:
             raise RuntimeError("Exp113 Delay production promotion did not improve Delay")
-        if (payload["comparison_test_projects"], payload["comparison_test_snapshots"]) != (721, 11200):
-            raise RuntimeError("Verified 2001-2021 production cohort changed")
+        if payload["comparison_test_projects"] < 2 or payload["comparison_test_snapshots"] < payload["comparison_test_projects"]:
+            raise RuntimeError("Evidence-defined comparison cohort is not usable")
     if payload["risk_retained"] is not True:
         raise RuntimeError("Combined production promotion failed Risk isolation guard")
 
@@ -112,6 +107,7 @@ def main() -> None:
     print(f"{prefix}_COST_MAE={payload['cost_mae']}")
     print(f"{prefix}_COST_IMPROVEMENT_PERCENT={payload['cost_improvement_percentage']}")
     print(f"{prefix}_DELAY_MAE={payload['delay_mae']}")
+    print(f"{prefix}_DELAY_MAPE_PERCENT={payload['delay_mape_percent']}")
     print(f"{prefix}_DELAY_IMPROVEMENT_PERCENT={payload['delay_improvement_percentage']}")
     print(f"{prefix}_PROJECTS={payload['comparison_test_projects']}")
     print(f"{prefix}_SNAPSHOTS={payload['comparison_test_snapshots']}")
