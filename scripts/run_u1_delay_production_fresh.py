@@ -53,7 +53,7 @@ def main() -> None:
         comparable = validation[validation["cost_evaluation_eligible"].astype(bool)].copy()
         comparable = assign_project_balanced_weights(comparable)
         live_cost_mae = _weighted_mae(
-            comparable, "predicted_cost_overrun_percentage", "actual_cost_overrun_percentage"
+            comparable, "predicted_cost_overrun", "actual_cost_overrun_percentage"
         )
         live_delay_mae = _weighted_mae(comparable, "predicted_delay_days", "actual_delay_days")
 
