@@ -1,9 +1,9 @@
 """Experiment G: learned nonlinear earned-Cost benchmark.
 
 Learn the empirical expenditure-vs-physical-progress curve from training projects
-instead of imposing fixed EVM identities.  The candidate and its internal control
+instead of imposing fixed EVM identities. The candidate and its internal control
 use the same preregistered L1 LightGBM; the only control-vs-candidate difference
-is the learned earned-Cost representation.  Production remains untouched.
+is the learned earned-Cost representation. Production remains untouched.
 """
 from __future__ import annotations
 
@@ -44,6 +44,17 @@ def _num(frame: pd.DataFrame, col: str) -> pd.Series:
     return pd.to_numeric(frame.get(col, pd.Series(np.nan, index=frame.index)), errors="coerce")
 
 
+def _first_numeric(frame: pd.DataFrame, *cols: str) -> pd.Series:
+    """Return the first available same-snapshot numeric alias, filling gaps causally."""
+    out = pd.Series(np.nan, index=frame.index, dtype=float)
+    for col in cols:
+        if col not in frame.columns:
+            continue
+        values = _num(frame, col)
+        out = out.where(out.notna(), values)
+    return out
+
+
 def _norm_sector(frame: pd.DataFrame) -> pd.Series:
     if "_norm_sector" in frame:
         return frame["_norm_sector"].astype("string").fillna("<NA>")
@@ -53,20 +64,33 @@ def _norm_sector(frame: pd.DataFrame) -> pd.Series:
 def _curve_inputs(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     """Return canonical as-of physical progress and spend ratio.
 
-    Some production enrichment paths leave the direct aliases sparsely populated
-    while retaining their mathematically equivalent as-of components. Reconstruct
-    only from those same-snapshot components; never use outcomes or future rows.
+    PAIMANA ingestion and production enrichment use several names for the same
+    observable snapshot fields. Resolve only those same-snapshot aliases; never
+    use outcomes, future rows, or fabricated defaults.
     """
-    progress = _num(frame, "physical_progress")
-    if not progress.notna().any():
-        progress = _num(frame, "expected_progress_percentage") + _num(frame, "progress_deviation")
-    progress = progress.clip(0, 100)
+    progress = _first_numeric(
+        frame,
+        "physical_progress",
+        "physical_progress_percentage",
+        "physical_progress_pct",
+    )
+    reconstructed_progress = _num(frame, "expected_progress_percentage") + _num(frame, "progress_deviation")
+    progress = progress.where(progress.notna(), reconstructed_progress).clip(0, 100)
 
-    spend = _num(frame, "expenditure_ratio")
-    if not spend.notna().any():
-        cumulative = _num(frame, "cumulative_expenditure_cr")
-        approved = _num(frame, "approved_cost_cr")
-        spend = (cumulative / approved).where(approved.gt(0))
+    spend = _first_numeric(frame, "expenditure_ratio", "financial_progress")
+    cumulative = _first_numeric(
+        frame,
+        "cumulative_expenditure_cr",
+        "current_expenditure_cr",
+        "current_expenditure",
+        "expenditure_cr",
+    )
+    approved = _first_numeric(frame, "approved_cost_cr", "original_cost", "original_cost_cr")
+    reconstructed_spend = (cumulative / approved).where(approved.gt(0))
+    spend = spend.where(spend.notna(), reconstructed_spend)
+    # Financial progress is percentage-like in source data; expenditure_ratio is ratio-like.
+    if spend.dropna().median() > 2.0:
+        spend = spend / 100.0
     return progress, spend
 
 
