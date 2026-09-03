@@ -22,11 +22,19 @@ from backend.app.ml.experiments.exp35_aft_residual_combo import (
     _fit_aft_family_models,
     _remaining_frame,
 )
-from backend.app.ml.experiments.nextgen_common import _compare, _prepare, normalize_taxonomy
+from backend.app.ml.experiments.nextgen_common import _prepare, normalize_taxonomy
 from backend.app.ml.experiments.path_oof_delay_exp34 import _rolling_folds
 from backend.app.ml.monthly_training import MODEL_ROOT, _json_safe, _regression_metrics, temporal_project_split
-from backend.app.ml.production_cost_baseline import _prediction_rows, target_feature_contract
-from backend.app.ml.production_exp35_baseline import CALIBRATION_GATE_FEATURE, _select_aft_calibration_projects
+from backend.app.ml.production_cost_baseline import (
+    _prediction_rows,
+    _production_cost_evaluation_rows,
+    target_feature_contract,
+)
+from backend.app.ml.production_exp35_baseline import (
+    CALIBRATION_GATE_FEATURE,
+    _aft_routing_limit,
+    _select_aft_calibration_projects,
+)
 from backend.app.ml.production_exp61_baseline import (
     _build_temporal_delay_priors,
     train_window_with_promoted_cost_and_delay as train_exp61_production,
@@ -265,7 +273,13 @@ def train_window_with_promoted_cost_and_delay(
     prepared = normalize_taxonomy(_prepare(data))
     train, test = temporal_project_split(prepared, training_start, training_end, test_end)
     prior_train, prior_test, prior_state = _build_temporal_delay_priors(train, test)
-    shared_eval = _compare(prior_test)
+
+    shared_eval = _production_cost_evaluation_rows(prior_test).copy()
+    calibration_project_ids = _select_aft_calibration_projects(
+        shared_eval,
+        limit=_aft_routing_limit(training_start, training_end, test_end),
+    )
+    shared_eval[CALIBRATION_GATE_FEATURE] = shared_eval["canonical_project_id"].astype("string").isin(calibration_project_ids)
 
     production_delay = np.maximum(0.0, np.asarray(base_delay_model.predict(shared_eval), dtype=float))
     oof = _delay_oof_frame(prior_train, base_delay_model)
@@ -299,8 +313,8 @@ def train_window_with_promoted_cost_and_delay(
         if float(delay_metrics["MAE"]) >= float(old_delay_metrics["MAE"]):
             raise RuntimeError("U1 Delay failed to improve the verified 2001-2021 production window")
 
-    # Full validation rows need the same evidence-only AFT gate as the shared cohort.
-    calibration_project_ids = _select_aft_calibration_projects(shared_eval)
+    # Full validation rows must receive the exact same window-specific AFT gate
+    # as the shared evaluation cohort.
     prior_test = prior_test.copy()
     prior_test[CALIBRATION_GATE_FEATURE] = prior_test["canonical_project_id"].astype("string").isin(calibration_project_ids)
 
