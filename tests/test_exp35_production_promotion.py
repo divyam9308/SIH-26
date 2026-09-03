@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from backend.app.ml.experiments.path_oof_delay_exp34 import FAMILIES
 from backend.app.ml.production_exp35_baseline import (
@@ -8,6 +9,8 @@ from backend.app.ml.production_exp35_baseline import (
     ResidualCalibratedCostModel,
     PRODUCTION_COST_BASELINE,
     PRODUCTION_DELAY_BASELINE,
+    VERIFIED_AFT_CALIBRATION_PROJECTS,
+    _aft_routing_limit,
     _select_aft_calibration_projects,
 )
 
@@ -120,6 +123,7 @@ def _routing_fixture():
                     "canonical_project_id": project,
                     "snapshot_date": f"2020-01-{i + 1:02d}",
                     "planned_completion_date": "2020-02-01" if i < eligible else None,
+                    # Deliberately extreme target-like data must not affect routing.
                     "actual_delay_days": 10000 if project == "D" else 0,
                 }
             )
@@ -131,17 +135,31 @@ def test_aft_routing_selects_all_projects_with_as_of_evidence_by_default():
     assert selected == {"A", "B", "C", "D"}
 
 
-def test_aft_routing_supports_explicit_legacy_limit_without_using_targets():
+def test_aft_routing_supports_explicit_frozen_limit_without_using_targets():
     selected = _select_aft_calibration_projects(_routing_fixture(), limit=2)
     assert selected == {"A", "B"}
 
 
-def test_production_baseline_names_identify_evidence_router_and_fallback():
+def test_explicit_frozen_limit_still_rejects_insufficient_evidence():
+    with pytest.raises(RuntimeError, match="cannot form the requested 688-project"):
+        _select_aft_calibration_projects(
+            _routing_fixture(), limit=VERIFIED_AFT_CALIBRATION_PROJECTS
+        )
+
+
+def test_688_limit_applies_only_to_verified_2001_2021_window():
+    assert VERIFIED_AFT_CALIBRATION_PROJECTS == 688
+    assert _aft_routing_limit(2001, 2021, 2025) == 688
+    assert _aft_routing_limit(2001, 2019, 2025) is None
+    assert _aft_routing_limit(2001, 2020, 2021) is None
+    assert _aft_routing_limit(2001, 2022, 2025) is None
+
+
+def test_production_baseline_name_remains_frozen_v2_with_688_fallback_contract():
     assert "exp33" in PRODUCTION_COST_BASELINE
     assert "exp32" in PRODUCTION_DELAY_BASELINE
     assert "exp33" in PRODUCTION_DELAY_BASELINE
-    assert "evidence_router" in PRODUCTION_DELAY_BASELINE
-    assert "688" not in PRODUCTION_DELAY_BASELINE
+    assert "688" in PRODUCTION_DELAY_BASELINE
     assert "exp34_fallback" in PRODUCTION_DELAY_BASELINE
 
 
