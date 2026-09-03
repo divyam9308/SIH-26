@@ -8,7 +8,6 @@ from backend.app.ml.production_exp35_baseline import (
     ResidualCalibratedCostModel,
     PRODUCTION_COST_BASELINE,
     PRODUCTION_DELAY_BASELINE,
-    VERIFIED_AFT_CALIBRATION_PROJECTS,
     _select_aft_calibration_projects,
 )
 
@@ -78,7 +77,7 @@ def test_delay_wrapper_uses_exp32_aft_then_exp33_when_evidence_exists():
     np.testing.assert_allclose(model.predict(frame), [6.0])
 
 
-def test_delay_wrapper_uses_exp34_outside_fixed_calibration_gate():
+def test_delay_wrapper_uses_exp34_when_explicit_route_gate_is_false():
     model = _delay_model(fallback=321.0)
     frame = pd.DataFrame(
         {
@@ -106,7 +105,7 @@ def test_missing_historical_gate_does_not_disable_live_aft():
     np.testing.assert_allclose(model.predict(frame), [6.0])
 
 
-def test_aft_calibration_cohort_selection_is_fixed_and_evidence_only():
+def _routing_frame():
     rows = []
     for project, eligible, total in [
         ("A", 3, 3),
@@ -120,22 +119,30 @@ def test_aft_calibration_cohort_selection_is_fixed_and_evidence_only():
                     "canonical_project_id": project,
                     "snapshot_date": f"2020-01-{i + 1:02d}",
                     "planned_completion_date": "2020-02-01" if i < eligible else None,
-                    # These deliberately extreme target-like columns must not affect selection.
+                    # Deliberately extreme target-like values must not affect routing.
                     "actual_delay_days": 10000 if project == "D" else 0,
                 }
             )
-    frame = pd.DataFrame(rows)
-    selected = _select_aft_calibration_projects(frame, limit=2)
+    return pd.DataFrame(rows)
+
+
+def test_aft_routing_selects_all_projects_with_usable_evidence_by_default():
+    selected = _select_aft_calibration_projects(_routing_frame())
+    assert selected == {"A", "B", "C", "D"}
+
+
+def test_aft_routing_legacy_limit_is_optional_and_evidence_only():
+    selected = _select_aft_calibration_projects(_routing_frame(), limit=2)
     assert selected == {"A", "B"}
 
 
-def test_production_baseline_names_identify_688_project_combined_promotion():
-    assert VERIFIED_AFT_CALIBRATION_PROJECTS == 688
+def test_production_baseline_names_identify_evidence_router_and_fallback():
     assert "exp33" in PRODUCTION_COST_BASELINE
     assert "exp32" in PRODUCTION_DELAY_BASELINE
     assert "exp33" in PRODUCTION_DELAY_BASELINE
-    assert "688" in PRODUCTION_DELAY_BASELINE
+    assert "evidence_router" in PRODUCTION_DELAY_BASELINE
     assert "exp34_fallback" in PRODUCTION_DELAY_BASELINE
+    assert "688" not in PRODUCTION_DELAY_BASELINE
 
 
 # Touch this contract test whenever the dedicated production workflow changes so
