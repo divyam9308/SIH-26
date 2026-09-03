@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 360
     env:
       PYTHONPATH: ${{ github.workspace }}
-      EXP130_OOF_WORKERS: '3'
+      EXP130_OOF_WORKERS: '2'
       EXP130_THREADS_PER_WORKER: '2'
 
     steps:
