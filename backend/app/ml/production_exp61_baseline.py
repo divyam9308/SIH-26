@@ -37,6 +37,7 @@ from backend.app.ml.production_exp35_baseline import (
     AFTResidualDelayModel,
     CALIBRATION_GATE_FEATURE,
     ResidualCalibratedCostModel,
+    _aft_routing_limit,
     _select_aft_calibration_projects,
     train_window_with_promoted_cost_and_delay as train_previous_production,
 )
@@ -211,7 +212,10 @@ def train_window_with_promoted_cost_and_delay(
     )
 
     shared_eval = _production_cost_evaluation_rows(prior_test).copy()
-    calibration_project_ids = _select_aft_calibration_projects(shared_eval)
+    calibration_project_ids = _select_aft_calibration_projects(
+        shared_eval,
+        limit=_aft_routing_limit(training_start, training_end, test_end),
+    )
     shared_eval[CALIBRATION_GATE_FEATURE] = shared_eval["canonical_project_id"].astype("string").isin(calibration_project_ids)
     test = prior_test.copy()
     test[CALIBRATION_GATE_FEATURE] = test["canonical_project_id"].astype("string").isin(calibration_project_ids)
@@ -229,8 +233,8 @@ def train_window_with_promoted_cost_and_delay(
     cost_metrics = metric("actual_cost_overrun_percentage", new_cost_prediction)
     delay_metrics = metric("actual_delay_days", new_delay_prediction)
 
-    # The reference decision window still has performance guards, but its cohort
-    # size is whatever the evidence rule yields rather than a hard-coded count.
+    # The reference decision window keeps its performance guards; the routing
+    # cohort itself follows Exp35's frozen-688-vs-generic-window policy above.
     if (training_start, training_end, test_end) == (2001, 2021, 2025):
         if float(cost_metrics["MAE"]) >= float(old_cost_metrics["MAE"]):
             raise RuntimeError("Exp61 Cost failed to improve the verified production window")
