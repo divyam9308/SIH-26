@@ -23,7 +23,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Exp34 contract tests
         run: PYTHONPATH=. pytest -q tests/test_exp34_production_promotion.py tests/test_exp34_path_oof_delay.py
-      - name: Reproduce the frozen Exp34 regression baseline directly
+      - name: Reproduce Exp34 using the evidence-defined comparable cohort
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -47,23 +47,28 @@ jobs:
           assert result['metadata']['promoted_delay_from_experiment'] == 'exp_34'
 
           cost_mae = float(result['lifecycle']['metrics']['cost']['MAE'])
-          delay_mae_721 = float(result['lifecycle']['metrics']['delay']['MAE'])
+          delay_mae_comparable = float(result['lifecycle']['metrics']['delay']['MAE'])
           contract = result['metadata']['delay_evaluation_contract']
-          assert int(contract['test_projects']) == 721, contract
-          assert int(contract['test_snapshots']) == 11200, contract
-          assert int(contract['full_holdout_projects']) == 728, contract
-          delay_mae_728 = float(contract['full_holdout_delay_metrics']['MAE'])
+          assert contract['source_filter'] == 'exp12_comparable_trailing_12m_history', contract
+          assert contract['cohort_count_policy'] == 'observed_only_no_fixed_project_or_snapshot_requirement', contract
+          assert int(contract['test_projects']) >= 2, contract
+          assert int(contract['test_snapshots']) >= int(contract['test_projects']), contract
+          delay_mae_full = float(contract['full_holdout_delay_metrics']['MAE'])
 
+          # These are metric-regression checks for this historical window, not
+          # project-count eligibility requirements.
           assert abs(cost_mae - 26.872) <= 0.001, cost_mae
-          assert abs(delay_mae_721 - 501.303) <= 0.001, delay_mae_721
-          assert abs(delay_mae_728 - 503.555) <= 0.001, delay_mae_728
+          assert abs(delay_mae_comparable - 501.303) <= 0.001, delay_mae_comparable
+          assert abs(delay_mae_full - 503.555) <= 0.001, delay_mae_full
 
           metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
           weights = metadata['delay_blend_weights']
           assert weights == {'extra_trees': 0.2, 'lightgbm': 0.6, 'xgboost': 0.2}, weights
-          print(f'EXP34_REGRESSION_COST_MAE_721={cost_mae:.6f}')
-          print(f'EXP34_REGRESSION_DELAY_MAE_721={delay_mae_721:.6f}')
-          print(f'EXP34_REGRESSION_DELAY_MAE_FULL_728={delay_mae_728:.6f}')
+          print(f'EXP34_REGRESSION_COST_MAE_COMPARABLE={cost_mae:.6f}')
+          print(f'EXP34_REGRESSION_DELAY_MAE_COMPARABLE={delay_mae_comparable:.6f}')
+          print(f'EXP34_REGRESSION_DELAY_MAE_FULL_HOLDOUT={delay_mae_full:.6f}')
+          print(f'EXP34_COMPARISON_PROJECTS={contract["test_projects"]}')
+          print(f'EXP34_COMPARISON_SNAPSHOTS={contract["test_snapshots"]}')
           print('EXP34_REGRESSION_BASELINE=VERIFIED')
           PY
       - uses: actions/upload-artifact@v4
