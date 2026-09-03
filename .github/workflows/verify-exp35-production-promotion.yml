@@ -35,18 +35,27 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
+          from backend.app.ml.monthly_lifecycle import build_training_dataset
+          from backend.app.ml.production_exp35_baseline import train_window_with_promoted_cost_and_delay
 
-          result = retrain_lifecycle(2001, 2021)
-          assert result['window'] == '2001_2021', result['window']
-          assert result['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert result['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert result['promoted_from_experiment'] == 'exp_35'
-          assert result['promoted_delay_from_experiment'] == 'exp_35'
+          data, identity = build_training_dataset()
+          result = train_window_with_promoted_cost_and_delay(
+              2001,
+              2021,
+              2025,
+              data=data,
+              identity=identity,
+          )
+          metadata = result['metadata']
+          lifecycle = result['lifecycle']
+          assert metadata['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
+          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
+          assert metadata['promoted_from_experiment'] == 'exp_35'
+          assert metadata['promoted_delay_from_experiment'] == 'exp_35'
 
-          cost_mae = float(result['metrics']['cost_model']['MAE'])
-          delay_mae_721 = float(result['metrics']['delay_model']['MAE'])
-          contract = result['metrics']['metadata']['delay_evaluation_contract']
+          cost_mae = float(lifecycle['metrics']['cost']['MAE'])
+          delay_mae_721 = float(lifecycle['metrics']['delay']['MAE'])
+          contract = metadata['delay_evaluation_contract']
           assert int(contract['test_projects']) == 721, contract
           assert int(contract['test_snapshots']) == 11200, contract
           assert int(contract['calibration_cohort_projects']) == 688, contract
@@ -67,16 +76,16 @@ jobs:
           assert delay_exp_688 < delay_base_688, (delay_exp_688, delay_base_688)
           assert delay_mae_721 < previous_delay_mae, (delay_mae_721, previous_delay_mae)
 
-          metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
-          assert metadata['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert metadata['promoted_from_experiment'] == 'exp_35'
-          assert metadata['promoted_delay_from_experiment'] == 'exp_35'
-          assert metadata['risk_policy'] == 'existing_production_retained'
-          assert metadata['delay_calibration_project_count'] == 688
-          assert metadata['delay_evaluation_contract']['test_projects'] == 721
-          assert metadata['delay_evaluation_contract']['calibration_cohort_projects'] == 688
-          assert metadata['delay_evaluation_contract']['routing_policy'] == 'fixed_688_reference_audit'
+          persisted = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
+          assert persisted['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
+          assert persisted['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
+          assert persisted['promoted_from_experiment'] == 'exp_35'
+          assert persisted['promoted_delay_from_experiment'] == 'exp_35'
+          assert persisted['risk_policy'] == 'existing_production_retained'
+          assert persisted['delay_calibration_project_count'] == 688
+          assert persisted['delay_evaluation_contract']['test_projects'] == 721
+          assert persisted['delay_evaluation_contract']['calibration_cohort_projects'] == 688
+          assert persisted['delay_evaluation_contract']['routing_policy'] == 'fixed_688_reference_audit'
 
           cost_gain = (previous_cost_mae - cost_mae) / previous_cost_mae * 100.0
           delay_gain_721 = (previous_delay_mae - delay_mae_721) / previous_delay_mae * 100.0
