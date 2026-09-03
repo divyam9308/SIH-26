@@ -88,7 +88,6 @@ def _curve_inputs(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     approved = _first_numeric(frame, "approved_cost_cr", "original_cost", "original_cost_cr")
     reconstructed_spend = (cumulative / approved).where(approved.gt(0))
     spend = spend.where(spend.notna(), reconstructed_spend)
-    # Financial progress is percentage-like in source data; expenditure_ratio is ratio-like.
     if spend.dropna().median() > 2.0:
         spend = spend / 100.0
     return progress, spend
@@ -170,12 +169,24 @@ def _fit_predict(train: pd.DataFrame, score: pd.DataFrame, features: list[str], 
 def fit_experiment(training_end: int, output: str):
     ctx = prepare_context(training_end)
     train = ctx["train"].copy(); score = ctx["cohort"].copy()
-    train_enriched = attach_earned_cost(train, train)
-    score_enriched = attach_earned_cost(train, score)
-    control, control_cols = _fit_predict(train_enriched, score_enriched, BASE_FEATURES, SEED)
-    candidate, candidate_cols = _fit_predict(train_enriched, score_enriched, BASE_FEATURES + EARNED_FEATURES, SEED)
-
     pc = np.asarray(ctx["production_cost"], float); pdly = np.asarray(ctx["production_delay"], float)
+    curve_available = True
+    no_op_reason = None
+    try:
+        train_enriched = attach_earned_cost(train, train)
+        score_enriched = attach_earned_cost(train, score)
+        control, control_cols = _fit_predict(train_enriched, score_enriched, BASE_FEATURES, SEED)
+        candidate, candidate_cols = _fit_predict(train_enriched, score_enriched, BASE_FEATURES + EARNED_FEATURES, SEED)
+    except ValueError as exc:
+        if str(exc) != "Experiment G requires physical-progress/expenditure history":
+            raise
+        curve_available = False
+        no_op_reason = str(exc)
+        control = pc.copy()
+        candidate = pc.copy()
+        control_cols = []
+        candidate_cols = []
+
     pcm = metric(score, "actual_cost_overrun_percentage", pc); ecm = metric(score, "actual_cost_overrun_percentage", candidate); control_mae = metric(score, "actual_cost_overrun_percentage", control); pdm = metric(score, "actual_delay_days", pdly); improvement = gain(pcm, ecm)
     evidence = score[["canonical_project_id", "sample_weight", "actual_cost_overrun_percentage"]].copy(); evidence["production"] = pc; evidence["experiment"] = candidate
     bootstrap = paired_project_mae_comparison(evidence, actual="actual_cost_overrun_percentage", baseline_prediction="production", candidate_prediction="experiment", bootstrap_samples=5000, seed=SEED)
@@ -197,6 +208,9 @@ def fit_experiment(training_end: int, output: str):
             "curve_fit_uses_cost_outcome": False,
             "future_holdout_used_for_curve": False,
             "curve_input_fallbacks_use_same_snapshot_components_only": True,
+            "required_curve_history_available": curve_available,
+            "no_op_control": not curve_available,
+            "no_op_reason": no_op_reason,
         },
     }
     path = Path(output); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(_json_safe(result), indent=2, allow_nan=False) + "\n")
