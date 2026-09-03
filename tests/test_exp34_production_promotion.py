@@ -5,8 +5,8 @@ import pytest
 from backend.app.ml.production_delay_baseline import (
     DEFAULT_PRODUCTION_WINDOW,
     PATH_FEATURES,
+    PRODUCTION_DELAY_EVALUATION_COHORT,
     ProductionDelayBlendModel,
-    VERIFIED_PRODUCTION_EVIDENCE_PROJECTS,
     enrich_history_for_delay_production,
 )
 from backend.app.services import lifecycle_retraining_service, monthly_prediction_service
@@ -20,10 +20,10 @@ class _ConstantModel:
         return np.full(len(frame), self.value, dtype=float)
 
 
-def test_exp34_production_window_and_verified_cohort_are_fixed():
+def test_exp34_production_window_uses_evidence_defined_comparable_cohort():
     assert DEFAULT_PRODUCTION_WINDOW == "2001_2021"
     assert monthly_prediction_service.DEFAULT_PRODUCTION_WINDOW == "2001_2021"
-    assert VERIFIED_PRODUCTION_EVIDENCE_PROJECTS == 721
+    assert PRODUCTION_DELAY_EVALUATION_COHORT == "shared_exp12_comparable_evidence_cohort"
     assert lifecycle_retraining_service.train_window_with_promoted_cost_and_delay.__name__ == (
         "train_window_with_promoted_cost_and_delay"
     )
