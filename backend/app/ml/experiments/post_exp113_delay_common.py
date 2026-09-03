@@ -10,7 +10,7 @@ from backend.app.ml.experiments.nextgen_common import _prepare,normalize_taxonom
 from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights,build_training_dataset
 from backend.app.ml.monthly_training import _json_safe,_regression_metrics,temporal_project_split
 from backend.app.ml.production_cost_baseline import _production_cost_evaluation_rows
-from backend.app.ml.production_exp35_baseline import CALIBRATION_GATE_FEATURE,_select_aft_calibration_projects
+from backend.app.ml.production_exp35_baseline import CALIBRATION_GATE_FEATURE,_aft_routing_limit,_select_aft_calibration_projects
 from backend.app.ml.production_exp61_baseline import _build_temporal_delay_priors
 from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay as train_current_production
 WINDOWS={2021:(2022,2025),2022:(2023,2025)}
@@ -37,7 +37,7 @@ def prepare_context(end):
     with tempfile.TemporaryDirectory(prefix=f'post-exp113-{end}-') as td:
         root=Path(td)/'models';train_current_production(2001,end,test_end,data=data,identity=identity,artifact_root=root);target=root/f'2001_{end}'
         cm=joblib.load(target/'cost_model.pkl');dm=joblib.load(target/'delay_model.pkl');prepared=normalize_taxonomy(_prepare(data));train,test=temporal_project_split(prepared,2001,end,test_end);train,test,_=_build_temporal_delay_priors(train,test)
-        cohort=_production_cost_evaluation_rows(test).copy();ids=_select_aft_calibration_projects(cohort);cohort[CALIBRATION_GATE_FEATURE]=cohort['canonical_project_id'].astype('string').isin(ids);cohort=assign_project_balanced_weights(cohort)
+        cohort=_production_cost_evaluation_rows(test).copy();ids=_select_aft_calibration_projects(cohort,limit=_aft_routing_limit(2001,end,test_end));cohort[CALIBRATION_GATE_FEATURE]=cohort['canonical_project_id'].astype('string').isin(ids);cohort=assign_project_balanced_weights(cohort)
         pc=np.asarray(cm.predict(cohort),float);pdly=np.maximum(0,np.asarray(dm.predict(cohort),float))
     return dict(training_end=end,test_start=test_start,test_end=test_end,train=train,cohort=cohort,cost_model=cm,delay_model=dm,production_cost=pc,production_delay=pdly,full_data=data,identity=identity)
 _OOF_WORKER_DATA=None
