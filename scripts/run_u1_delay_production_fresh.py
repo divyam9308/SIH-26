@@ -16,6 +16,9 @@ EXPECTED_COST = {
     2019: 27.801,
     2021: 25.829,
 }
+EXPECTED_REFERENCE_DELAY = {
+    2021: 346.599,
+}
 TOLERANCE = 0.05
 
 
@@ -85,6 +88,12 @@ def main() -> None:
     expected_cost = EXPECTED_COST[a.end]
     if not _close(payload["cost_mae"], expected_cost):
         raise RuntimeError(f"Exp105 Cost did not reproduce: {payload['cost_mae']} vs expected {expected_cost}")
+    if a.end in EXPECTED_REFERENCE_DELAY:
+        expected_delay = EXPECTED_REFERENCE_DELAY[a.end]
+        if not _close(payload["delay_mae"], expected_delay):
+            raise RuntimeError(
+                f"Frozen Exp113 Delay did not reproduce: {payload['delay_mae']} vs expected {expected_delay}"
+            )
     if payload["delay_mape_percent"] is None or not np.isfinite(float(payload["delay_mape_percent"])):
         raise RuntimeError("Delay percentage error (MAPE) was not finite")
     if not _close(payload["persisted_inference_cost_mae"], payload["cost_mae"]):
