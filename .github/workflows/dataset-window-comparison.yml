@@ -48,3 +48,52 @@ jobs:
           name: dataset-window-${{ matrix.window }}
           path: reports/dataset_window_comparison/${{ matrix.window }}.json
           if-no-files-found: warn
+
+  summary:
+    needs: compare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dataset-window-*
+          path: reports/combined
+          merge-multiple: true
+
+      - name: Build combined Cost and Delay MAE table
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          root = Path('reports/combined')
+          rows = [json.loads(p.read_text()) for p in root.glob('*.json')]
+          rows.sort(key=lambda x: x['training_end'])
+          if len(rows) != 3:
+              raise SystemExit(f'Expected 3 completed windows, found {len(rows)}')
+
+          summary = {
+              'comparison': 'current production main after PR #186',
+              'windows': rows,
+          }
+          (root / 'dataset_window_mae_summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          with (root / 'dataset_window_mae_summary.csv').open('w', newline='') as fh:
+              writer = csv.DictWriter(
+                  fh,
+                  fieldnames=['label', 'training_window', 'test_window', 'cost_mae', 'delay_mae_days', 'comparison_projects', 'comparison_snapshots'],
+              )
+              writer.writeheader()
+              for row in rows:
+                  writer.writerow({key: row[key] for key in writer.fieldnames})
+
+          print('WINDOW | COST_MAE | DELAY_MAE_DAYS')
+          for row in rows:
+              print(f"{row['label']} | {row['cost_mae']:.6f} | {row['delay_mae_days']:.6f}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dataset-window-mae-summary
+          path: |
+            reports/combined/dataset_window_mae_summary.json
+            reports/combined/dataset_window_mae_summary.csv
