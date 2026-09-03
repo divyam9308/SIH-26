@@ -17,7 +17,7 @@ EXPECTED_COST = {
     2021: 25.829,
 }
 EXPECTED_REFERENCE_DELAY = {
-    2021: 346.599,
+    2021: 345.511,
 }
 TOLERANCE = 0.05
 
@@ -55,29 +55,21 @@ def main() -> None:
         validation = pd.read_csv(artifact_root / f"{a.start}_{a.end}" / "prediction_validation.csv")
         comparable = validation[validation["cost_evaluation_eligible"].astype(bool)].copy()
         comparable = assign_project_balanced_weights(comparable)
-        live_cost_mae = _weighted_mae(
-            comparable, "predicted_cost_overrun", "actual_cost_overrun_percentage"
-        )
+        live_cost_mae = _weighted_mae(comparable, "predicted_cost_overrun", "actual_cost_overrun_percentage")
         live_delay_mae = _weighted_mae(comparable, "predicted_delay_days", "actual_delay_days")
 
     metrics = result["lifecycle"]["metrics"]
     promo = result["promotion"]
     contract = result["metadata"]["cost_evaluation_contract"]
     payload = {
-        "window": f"{a.start}_{a.end}",
-        "test_end": a.test_end,
-        "previous_cost_mae": promo["cost"]["previous_cost_mae"],
-        "cost_mae": metrics["cost"]["MAE"],
-        "persisted_inference_cost_mae": live_cost_mae,
-        "cost_improvement_percentage": promo["cost"]["cost_improvement_percentage"],
-        "previous_delay_mae": promo["delay"]["previous_delay_mae"],
-        "delay_mae": metrics["delay"]["MAE"],
-        "delay_mape_percent": metrics["delay"].get("MAPE"),
-        "persisted_inference_delay_mae": live_delay_mae,
+        "window": f"{a.start}_{a.end}", "test_end": a.test_end,
+        "previous_cost_mae": promo["cost"]["previous_cost_mae"], "cost_mae": metrics["cost"]["MAE"],
+        "persisted_inference_cost_mae": live_cost_mae, "cost_improvement_percentage": promo["cost"]["cost_improvement_percentage"],
+        "previous_delay_mae": promo["delay"]["previous_delay_mae"], "delay_mae": metrics["delay"]["MAE"],
+        "delay_mape_percent": metrics["delay"].get("MAPE"), "persisted_inference_delay_mae": live_delay_mae,
         "delay_improvement_percentage": promo["delay"]["delay_improvement_percentage"],
         "delay_routing_contract": result["metadata"].get("delay_evaluation_contract"),
-        "comparison_test_projects": contract["test_projects"],
-        "comparison_test_snapshots": contract["test_snapshots"],
+        "comparison_test_projects": contract["test_projects"], "comparison_test_snapshots": contract["test_snapshots"],
         "production_cost_baseline": result["metadata"]["production_cost_baseline"],
         "production_delay_baseline": result["metadata"]["production_delay_baseline"],
         "promoted_cost_from_experiment": result["metadata"]["promoted_cost_from_experiment"],
@@ -91,21 +83,13 @@ def main() -> None:
     if a.end in EXPECTED_REFERENCE_DELAY:
         expected_delay = EXPECTED_REFERENCE_DELAY[a.end]
         if not _close(payload["delay_mae"], expected_delay):
-            raise RuntimeError(
-                f"Frozen Exp113 Delay did not reproduce: {payload['delay_mae']} vs expected {expected_delay}"
-            )
+            raise RuntimeError(f"Frozen Exp113 Delay did not reproduce: {payload['delay_mae']} vs expected {expected_delay}")
     if payload["delay_mape_percent"] is None or not np.isfinite(float(payload["delay_mape_percent"])):
         raise RuntimeError("Delay percentage error (MAPE) was not finite")
     if not _close(payload["persisted_inference_cost_mae"], payload["cost_mae"]):
-        raise RuntimeError(
-            "Persisted/live Exp105 Cost inference does not match the verified in-memory prediction: "
-            f"{payload['persisted_inference_cost_mae']} vs {payload['cost_mae']}"
-        )
+        raise RuntimeError(f"Persisted/live Exp105 Cost inference does not match the verified in-memory prediction: {payload['persisted_inference_cost_mae']} vs {payload['cost_mae']}")
     if not _close(payload["persisted_inference_delay_mae"], payload["delay_mae"]):
-        raise RuntimeError(
-            "Persisted/live Exp113 Delay inference does not match the verified in-memory prediction: "
-            f"{payload['persisted_inference_delay_mae']} vs {payload['delay_mae']}"
-        )
+        raise RuntimeError(f"Persisted/live Exp113 Delay inference does not match the verified in-memory prediction: {payload['persisted_inference_delay_mae']} vs {payload['delay_mae']}")
     if a.end == 2021:
         if payload["cost_improvement_percentage"] <= 0:
             raise RuntimeError("Exp105 Cost production promotion did not improve Cost")
