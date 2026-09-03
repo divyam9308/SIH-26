@@ -39,10 +39,10 @@ jobs:
 
           result = retrain_lifecycle(2001, 2021)
           assert result['window'] == '2001_2021', result['window']
-          assert result['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert result['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert result['promoted_from_experiment'] == 'exp_35'
-          assert result['promoted_delay_from_experiment'] == 'exp_35'
+          assert result['production_cost_baseline'] == 'exp12_plus_exp51_shrunk_residual_v2'
+          assert result['production_delay_baseline'] == 'exp32_aft_plus_exp58_hierarchical_prior_exp33_calibration_exp34_fallback_v3'
+          assert result['promoted_from_experiment'] == 'exp_61'
+          assert result['promoted_delay_from_experiment'] == 'exp_61'
 
           cost_mae = float(result['metrics']['cost_model']['MAE'])
           delay_mae_721 = float(result['metrics']['delay_model']['MAE'])
@@ -68,10 +68,10 @@ jobs:
           assert delay_mae_721 < previous_delay_mae, (delay_mae_721, previous_delay_mae)
 
           metadata = json.loads(Path('models/monthly_lifecycle/2001_2021/metadata.json').read_text())
-          assert metadata['production_cost_baseline'] == 'exp12_plus_exp33_residual_v1'
-          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp33_residual_688_exp34_fallback_v2'
-          assert metadata['promoted_from_experiment'] == 'exp_35'
-          assert metadata['promoted_delay_from_experiment'] == 'exp_35'
+          assert metadata['production_cost_baseline'] == 'exp12_plus_exp51_shrunk_residual_v2'
+          assert metadata['production_delay_baseline'] == 'exp32_aft_plus_exp58_hierarchical_prior_exp33_calibration_exp34_fallback_v3'
+          assert metadata['promoted_from_experiment'] == 'exp_61'
+          assert metadata['promoted_delay_from_experiment'] == 'exp_61'
           assert metadata['risk_policy'] == 'existing_production_retained'
           assert metadata['delay_calibration_project_count'] == 688
           assert metadata['delay_evaluation_contract']['test_projects'] == 721
@@ -80,22 +80,22 @@ jobs:
 
           cost_gain = (previous_cost_mae - cost_mae) / previous_cost_mae * 100.0
           delay_gain_721 = (previous_delay_mae - delay_mae_721) / previous_delay_mae * 100.0
-          print(f'EXP32_EXP33_PRODUCTION_COST_MAE_721={cost_mae:.6f}')
-          print(f'EXP32_EXP33_PRODUCTION_COST_IMPROVEMENT_721={cost_gain:.6f}%')
+          print(f'EXP61_PRODUCTION_COST_MAE_721={cost_mae:.6f}')
+          print(f'EXP61_PRODUCTION_COST_IMPROVEMENT_721={cost_gain:.6f}%')
           print(f'EXP34_DELAY_MAE_CALIBRATION_688={delay_base_688:.6f}')
-          print(f'EXP32_EXP33_DELAY_MAE_CALIBRATION_688={delay_exp_688:.6f}')
-          print(f'EXP32_EXP33_DELAY_IMPROVEMENT_CALIBRATION_688={delay_gain_688:.6f}%')
-          print(f'EXP32_EXP33_PRODUCTION_DELAY_MAE_FULL_721={delay_mae_721:.6f}')
-          print(f'EXP32_EXP33_PRODUCTION_DELAY_IMPROVEMENT_FULL_721={delay_gain_721:.6f}%')
+          print(f'EXP61_DELAY_MAE_CALIBRATION_688={delay_exp_688:.6f}')
+          print(f'EXP61_DELAY_IMPROVEMENT_CALIBRATION_688={delay_gain_688:.6f}%')
+          print(f'EXP61_PRODUCTION_DELAY_MAE_FULL_721={delay_mae_721:.6f}')
+          print(f'EXP61_PRODUCTION_DELAY_IMPROVEMENT_FULL_721={delay_gain_721:.6f}%')
           print(f'AFT_CALIBRATION_PROJECTS={contract["calibration_cohort_projects"]}')
           print(f'AFT_ELIGIBLE_SNAPSHOTS={contract["aft_eligible_snapshots"]}')
           print(f'FALLBACK_PROJECTS={contract["fallback_projects"]}')
-          print('EXP32_EXP33_688_PRODUCTION_PROMOTION=VERIFIED')
+          print('EXP61_PRODUCTION_PROMOTION=VERIFIED')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: exp32-exp33-production-688-2001-2021
+          name: exp61-production-688-2001-2021
           path: |
             models/monthly_lifecycle/2001_2021/metadata.json
             models/monthly_lifecycle/2001_2021/evaluation_results.json
