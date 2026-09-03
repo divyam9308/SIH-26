@@ -1,0 +1,49 @@
+name: Exp130 outer residual correction
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/ml/experiments/exp130_outer_residual_correction.py'
+      - 'scripts/run_exp130_outer_residual_correction.py'
+      - 'tests/test_exp130_outer_residual_correction.py'
+      - '.github/workflows/exp130-outer-residual.yml'
+  workflow_dispatch:
+
+jobs:
+  exp130:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      EXP130_OOF_WORKERS: '3'
+      EXP130_THREADS_PER_WORKER: '2'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Focused leakage and contract tests
+        run: pytest -q tests/test_exp130_outer_residual_correction.py
+
+      - name: Run 2001-2021 outer residual experiment
+        run: python scripts/run_exp130_outer_residual_correction.py
+
+      - name: Report production vs Exp130 MAE
+        if: always()
+        run: |
+          if [ -f reports/exp130_outer_residual_2001_2021.json ]; then
+            cat reports/exp130_outer_residual_2001_2021.json
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp130-outer-residual-2001-2021
+          path: reports/exp130_outer_residual_2001_2021.json
+          if-no-files-found: warn
