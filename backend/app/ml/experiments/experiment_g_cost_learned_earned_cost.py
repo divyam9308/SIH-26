@@ -50,12 +50,32 @@ def _norm_sector(frame: pd.DataFrame) -> pd.Series:
     return frame.get("sector", pd.Series("<NA>", index=frame.index)).astype("string").fillna("<NA>").str.lower().str.replace(r"[^a-z0-9]+", " ", regex=True).str.strip()
 
 
+def _curve_inputs(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Return canonical as-of physical progress and spend ratio.
+
+    Some production enrichment paths leave the direct aliases sparsely populated
+    while retaining their mathematically equivalent as-of components. Reconstruct
+    only from those same-snapshot components; never use outcomes or future rows.
+    """
+    progress = _num(frame, "physical_progress")
+    if not progress.notna().any():
+        progress = _num(frame, "expected_progress_percentage") + _num(frame, "progress_deviation")
+    progress = progress.clip(0, 100)
+
+    spend = _num(frame, "expenditure_ratio")
+    if not spend.notna().any():
+        cumulative = _num(frame, "cumulative_expenditure_cr")
+        approved = _num(frame, "approved_cost_cr")
+        spend = (cumulative / approved).where(approved.gt(0))
+    return progress, spend
+
+
 def _fit_curve(train: pd.DataFrame) -> dict:
     work = train.copy()
-    progress = _num(work, "physical_progress").clip(0, 100)
+    progress, spend = _curve_inputs(work)
     work["_progress_bin"] = (np.floor(progress / 5.0) * 5.0).astype("Int64")
     work["_sector"] = _norm_sector(work)
-    work["_spend"] = _num(work, "expenditure_ratio")
+    work["_spend"] = spend
     global_curve = work.groupby("_progress_bin", dropna=True)["_spend"].agg(["median", "count"]).reset_index().sort_values("_progress_bin")
     sector_curve = work.groupby(["_sector", "_progress_bin"], dropna=False)["_spend"].agg(["median", "count"]).reset_index()
     sector_curve = sector_curve.loc[sector_curve["count"] >= 20].copy()
@@ -67,7 +87,7 @@ def _fit_curve(train: pd.DataFrame) -> dict:
 def attach_earned_cost(train_reference: pd.DataFrame, score: pd.DataFrame) -> pd.DataFrame:
     curves = _fit_curve(train_reference)
     out = score.copy()
-    progress = _num(out, "physical_progress").clip(0, 100)
+    progress, spend = _curve_inputs(out)
     out["_progress_bin"] = (np.floor(progress / 5.0) * 5.0).astype("Int64")
     out["_sector"] = _norm_sector(out)
     global_curve = curves["global"].rename(columns={"median": "_global_spend"})
@@ -75,7 +95,6 @@ def attach_earned_cost(train_reference: pd.DataFrame, score: pd.DataFrame) -> pd
     out = out.merge(global_curve[["_progress_bin", "_global_spend"]], on="_progress_bin", how="left", sort=False)
     out = out.merge(sector_curve[["_sector", "_progress_bin", "_sector_spend"]], on=["_sector", "_progress_bin"], how="left", sort=False)
     expected = pd.to_numeric(out["_sector_spend"], errors="coerce").fillna(pd.to_numeric(out["_global_spend"], errors="coerce"))
-    spend = _num(out, "expenditure_ratio")
     progress_fraction = (progress / 100.0).clip(lower=0.02)
     out["exp_g_expected_spend_ratio"] = expected
     out["exp_g_spend_vs_norm"] = spend - expected
@@ -153,6 +172,7 @@ def fit_experiment(training_end: int, output: str):
             "earned_features": EARNED_FEATURES,
             "curve_fit_uses_cost_outcome": False,
             "future_holdout_used_for_curve": False,
+            "curve_input_fallbacks_use_same_snapshot_components_only": True,
         },
     }
     path = Path(output); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(_json_safe(result), indent=2, allow_nan=False) + "\n")
