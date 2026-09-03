@@ -26,9 +26,9 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: Production wrapper contract tests
+      - name: Production wrapper and routing contract tests
         run: PYTHONPATH=. pytest -q tests/test_exp35_production_promotion.py tests/test_exp35_aft_residual_combo.py
-      - name: Retrain selected production window and verify fixed 688-project Delay calibration
+      - name: Retrain frozen production window and verify exact 688-project audit behavior
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -53,6 +53,8 @@ jobs:
           assert int(contract['aft_eligible_projects']) == 688, contract
           assert int(contract['fallback_projects']) == 33, contract
           assert int(contract['aft_eligible_snapshots']) <= 11200, contract
+          assert contract['routing_policy'] == 'fixed_688_reference_audit', contract
+          assert int(contract['fixed_audit_project_limit']) == 688, contract
           assert contract['fallback_policy'].startswith('Exp34 production Delay'), contract
 
           delay_base_688 = float(contract['base_exp34_mae_calibration_688'])
@@ -74,6 +76,7 @@ jobs:
           assert metadata['delay_calibration_project_count'] == 688
           assert metadata['delay_evaluation_contract']['test_projects'] == 721
           assert metadata['delay_evaluation_contract']['calibration_cohort_projects'] == 688
+          assert metadata['delay_evaluation_contract']['routing_policy'] == 'fixed_688_reference_audit'
 
           cost_gain = (previous_cost_mae - cost_mae) / previous_cost_mae * 100.0
           delay_gain_721 = (previous_delay_mae - delay_mae_721) / previous_delay_mae * 100.0
