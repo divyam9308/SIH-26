@@ -1,0 +1,50 @@
+name: Dataset window production MAE comparison
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/ml/experiments/dataset_window_comparison.py'
+      - 'scripts/run_dataset_window_comparison.py'
+      - 'tests/test_dataset_window_comparison.py'
+      - '.github/workflows/dataset-window-comparison.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        window: [2001_2017, 2001_2021, 2001_2022]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Focused contract tests
+        run: PYTHONPATH=. pytest -q tests/test_dataset_window_comparison.py
+
+      - name: Run current production stack for ${{ matrix.window }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/run_dataset_window_comparison.py --window ${{ matrix.window }}
+
+      - name: Show MAE result
+        if: always()
+        run: |
+          if [ -f reports/dataset_window_comparison/${{ matrix.window }}.json ]; then
+            cat reports/dataset_window_comparison/${{ matrix.window }}.json
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dataset-window-${{ matrix.window }}
+          path: reports/dataset_window_comparison/${{ matrix.window }}.json
+          if-no-files-found: warn
