@@ -119,6 +119,31 @@ function predictionCard(prediction, actual = null) {
   </section>` : ''}`;
 }
 
+function productionPredictionCard(prediction, actual = null) {
+  return `<section class="panel">
+    <span class="kicker">Fresh production prediction · outcome withheld until reveal</span>
+    <h2>${escape(prediction.project?.project_name || prediction.project?.project_id || 'Held-out project')}</h2>
+    <div class="notice compact"><strong>Production run:</strong> ${escape(prediction.run_id || 'Not recorded')} · <strong>dataset:</strong> ${escape(shortFingerprint(prediction.dataset_fingerprint))}</div>
+    <div class="detail-financial">
+      <div><span>Predicted cost overrun</span><strong>${fixed(prediction.predicted_cost_overrun)}%</strong></div>
+      <div><span>Predicted delay</span><strong>${fixed(prediction.predicted_delay_days)} days</strong></div>
+      <div><span>Predicted risk</span><strong>${escape(prediction.predicted_risk || 'N/A')}</strong></div>
+      <div><span>Risk probability</span><strong>${fixed(prediction.risk_probability_percentage)}%</strong></div>
+    </div>
+    <div class="notice compact"><strong>Leakage guard:</strong> the actual final outcome has not been sent to the browser yet.</div>
+  </section>
+  ${actual ? `<section class="panel">
+    <span class="kicker">Official outcome revealed once</span><h2>Production-model result</h2>
+    <div class="detail-financial">
+      <div><span>Actual final cost overrun</span><strong>${fixed(actual.actual_cost_overrun)}%</strong></div>
+      <div><span>Cost prediction error</span><strong>${fixed(actual.cost_error_absolute_pp)} pp</strong></div>
+      <div><span>Actual final delay</span><strong>${fixed(actual.actual_delay_days)} days</strong></div>
+      <div><span>Delay prediction error</span><strong>${fixed(actual.delay_error_absolute_days)} days</strong></div>
+      <div><span>Actual risk</span><strong>${escape(actual.actual_risk || 'N/A')}</strong></div>
+    </div>
+  </section>` : ''}`;
+}
+
 export async function ModelSimulationPage(root) {
   const catalog = await api.simulationVersions();
   if (!catalog.lifecycle_data_available) {
@@ -140,27 +165,30 @@ export async function ModelSimulationPage(root) {
   const defaultEnd = yearNumbers.includes(savedEnd) ? savedEnd : (preferredEnd || yearNumbers[Math.max(0, Math.floor(yearNumbers.length / 2) - 1)]);
   const challengerNotice = activeExperimentId
     ? `<strong>Active challenger:</strong> ${escape(activeExperimentName || activeExperimentId)}. The highest-numbered installed experiment adapter is selected automatically.`
-    : '<strong>No challenger installed.</strong> Merge an experiment adapter PR; the Retrain & Compare control will activate automatically.';
+    : '<strong>No challenger installed.</strong> You can still retrain the production lifecycle model for any valid year range and evaluate it on held-out projects.';
+  const comparisonMode = Boolean(activeExperimentId);
+  const trainAction = comparisonMode ? 'Retrain & Compare' : 'Retrain Production Model';
+  const predictionAction = comparisonMode ? 'Generate Both Predictions' : 'Generate Production Prediction';
 
-  root.innerHTML = `<header class="page-head"><div><span class="kicker">Judge-controlled historical lifecycle backtest</span><h1>Production vs Experiment Verification</h1><p>Retrain the current lifecycle production model and the registered experiment challenger on one frozen PAIMANA evidence contract, then compare both on the same future projects.</p></div></header>
+  root.innerHTML = `<header class="page-head"><div><span class="kicker">Judge-controlled historical lifecycle backtest</span><h1>${comparisonMode ? 'Production vs Experiment Verification' : 'Production Lifecycle Verification'}</h1><p>${comparisonMode ? 'Retrain the current lifecycle production model and the registered experiment challenger on one frozen PAIMANA evidence contract, then compare both on the same future projects.' : 'Retrain the current production lifecycle model for a selected year range, then evaluate it on unseen future projects.'}</p></div></header>
     <div class="notice">${challengerNotice}</div>
     <section class="panel">
-      <div class="panel-head"><div><span class="kicker">Step 1</span><h2>Retrain and compare</h2></div></div>
+      <div class="panel-head"><div><span class="kicker">Step 1</span><h2>${comparisonMode ? 'Retrain and compare' : 'Retrain production'}</h2></div></div>
       <div class="filters">
         <label>Training start year<select id="custom-start">${yearOptions(years, defaultStart)}</select></label>
         <label>Training end year<select id="custom-end">${yearOptions(years, defaultEnd)}</select></label>
-        <button class="primary-btn" id="custom-train" ${activeExperimentId ? '' : 'disabled'}>${activeExperimentId ? `Retrain & Compare vs ${escape(activeExperimentName || activeExperimentId)}` : 'No Experiment Challenger Installed'}</button>
+        <button class="primary-btn" id="custom-train">${comparisonMode ? `Retrain & Compare vs ${escape(activeExperimentName || activeExperimentId)}` : trainAction}</button>
       </div>
-      <div id="training-receipt" class="notice compact">${experiments.length ? 'No comparison has been trained in this browser session yet.' : 'The generic comparison harness is ready; install an experiment adapter to use it.'}</div>
+      <div id="training-receipt" class="notice compact">${experiments.length ? 'No comparison has been trained in this browser session yet.' : 'No production lifecycle run has been trained in this browser session yet.'}</div>
       <div id="overall-comparison"></div>
     </section>
     <section class="panel">
       <div class="panel-head"><div><span class="kicker">Step 2</span><h2>Judge chooses one unseen future project</h2></div></div>
       <div class="filters">
-        <label>Held-out completion year<select id="custom-test-year" disabled><option>Retrain & Compare first</option></select></label>
+        <label>Held-out completion year<select id="custom-test-year" disabled><option>${trainAction} first</option></select></label>
         <label>Official held-out project<select id="custom-project" disabled><option>Select a test year first</option></select></label>
         <button class="secondary-btn" id="random-project" disabled>Pick Random Project</button>
-        <button class="primary-btn" id="custom-predict" disabled>Generate Both Predictions</button>
+        <button class="primary-btn" id="custom-predict" disabled>${predictionAction}</button>
         <button class="secondary-btn" id="custom-reveal" disabled>Reveal Actual Outcome</button>
       </div>
       <div id="held-out-note" class="notice compact">Actual outcomes remain server-side until both predictions have been generated.</div>
@@ -191,7 +219,7 @@ export async function ModelSimulationPage(root) {
     output.innerHTML = '';
   };
 
-  const resetHeldOutState = (message = 'Retrain & Compare first') => {
+  const resetHeldOutState = (message = `${trainAction} first`) => {
     session = null;
     projectRows = [];
     activeExperiment = null;
@@ -203,23 +231,26 @@ export async function ModelSimulationPage(root) {
     randomButton.disabled = true;
     predictButton.disabled = true;
     revealButton.disabled = true;
-    heldOutNote.innerHTML = '<strong>No fresh comparison session is active.</strong> Step 2 will unlock only after the requested production and challenger runs both finish successfully.';
+    heldOutNote.innerHTML = comparisonMode
+      ? '<strong>No fresh comparison session is active.</strong> Step 2 will unlock only after the requested production and challenger runs both finish successfully.'
+      : '<strong>No fresh production session is active.</strong> Step 2 will unlock only after the requested year-range retraining finishes successfully.';
   };
 
   const loadProjects = async () => {
     if (!session || !testYear.value) return;
     resetPrediction();
-    const response = await api.comparisonProjects(session.comparison_session_id || session.session_id, Number(testYear.value));
+    const response = comparisonMode
+      ? await api.comparisonProjects(session.comparison_session_id || session.session_id, Number(testYear.value))
+      : await api.customSimulationProjects(session.session_id, Number(testYear.value));
     projectRows = response.items || [];
     project.innerHTML = projectRows.length ? projectRows.map((row) => `<option value="${row.record_index}">${escape(row.project_id)} · ${escape(row.project_name)}</option>`).join('') : '<option>No projects available</option>';
     project.disabled = !projectRows.length;
     predictButton.disabled = !projectRows.length;
     randomButton.disabled = !projectRows.length;
-    heldOutNote.innerHTML = `<strong>${projectRows.length} comparable projects.</strong> ${escape(response.note || '')}`;
+    heldOutNote.innerHTML = `<strong>${projectRows.length} ${comparisonMode ? 'comparable' : 'held-out'} projects.</strong> ${escape(response.note || '')}`;
   };
 
-  if (activeExperimentId) {
-    trainButton.addEventListener('click', async () => {
+  trainButton.addEventListener('click', async () => {
       overallNode.innerHTML = '';
       const startYear = Number(start.value);
       const endYear = Number(end.value);
@@ -229,14 +260,18 @@ export async function ModelSimulationPage(root) {
         return;
       }
 
-      resetHeldOutState(`Training ${startYear}–${endYear}…`);
+      resetHeldOutState(`${trainAction} ${startYear}–${endYear}…`);
       trainButton.disabled = true;
-      receipt.innerHTML = `<div class="loading">Retraining production and ${escape(activeExperimentName || activeExperimentId)} for ${startYear}–${endYear} on one frozen lifecycle dataset. Step 2 has been cleared until this exact run finishes…</div>`;
+      receipt.innerHTML = `<div class="loading">${comparisonMode ? `Retraining production and ${escape(activeExperimentName || activeExperimentId)}` : 'Retraining production'} for ${startYear}–${endYear} on one frozen lifecycle dataset. Step 2 has been cleared until this exact run finishes…</div>`;
       try {
-        const result = await api.retrainAndCompare(startYear, endYear, activeExperimentId);
-        const nextSession = result.session;
-        const nextExperiment = result.experiment;
-        if (!nextSession) throw new Error('Retrain & Compare returned no comparison session.');
+        const result = comparisonMode
+          ? await api.retrainAndCompare(startYear, endYear, activeExperimentId)
+          : { production: await api.retrainModel(startYear, endYear) };
+        const nextSession = comparisonMode
+          ? result.session
+          : await api.trainCustomSimulation(startYear, endYear, result.production?.run_id);
+        const nextExperiment = comparisonMode ? result.experiment : null;
+        if (!nextSession) throw new Error(`${trainAction} returned no judge session.`);
 
         const eligible = nextSession.eligible_test_years || [];
         const invalidYear = eligible.find((item) => Number(item.year) <= endYear);
@@ -246,8 +281,10 @@ export async function ModelSimulationPage(root) {
 
         session = nextSession;
         activeExperiment = nextExperiment;
-        receipt.innerHTML = `<strong>Fresh comparison ready.</strong> Production run ${escape(result.production?.run_id || 'N/A')} · challenger run ${escape(activeExperiment?.run_id || 'N/A')} · dataset ${escape(shortFingerprint(result.production?.dataset_fingerprint))}.`;
-        overallNode.innerHTML = overallCard(result.overall_comparison, activeExperiment);
+        receipt.innerHTML = comparisonMode
+          ? `<strong>Fresh comparison ready.</strong> Production run ${escape(result.production?.run_id || 'N/A')} · challenger run ${escape(activeExperiment?.run_id || 'N/A')} · dataset ${escape(shortFingerprint(result.production?.dataset_fingerprint))}.`
+          : `<strong>Fresh production run ready.</strong> Production run ${escape(result.production?.run_id || 'N/A')} · dataset ${escape(shortFingerprint(result.production?.dataset_fingerprint))}.`;
+        overallNode.innerHTML = comparisonMode ? overallCard(result.overall_comparison, activeExperiment) : '';
         api.setActiveLifecycleRun({
           window: result.production?.window,
           model_version: result.production?.model_version,
@@ -258,23 +295,22 @@ export async function ModelSimulationPage(root) {
           receipt: result.production,
           session,
           experiment: activeExperiment,
-          overall_comparison: result.overall_comparison,
+          overall_comparison: comparisonMode ? result.overall_comparison : null,
         });
         testYear.innerHTML = eligible.length
           ? eligible.map((item) => `<option value="${item.year}">${item.year} · ${item.projects} projects</option>`).join('')
           : '<option>No eligible future years</option>';
         testYear.disabled = !eligible.length;
         if (eligible.length) await loadProjects();
-        else heldOutNote.innerHTML = `<div class="error-state">The fresh comparison completed, but no common held-out projects exist after ${endYear}.</div>`;
+        else heldOutNote.innerHTML = `<div class="error-state">The fresh ${comparisonMode ? 'comparison' : 'production run'} completed, but no eligible held-out projects exist after ${endYear}.</div>`;
       } catch (error) {
-        resetHeldOutState('Retrain & Compare failed');
+        resetHeldOutState(`${trainAction} failed`);
         overallNode.innerHTML = '';
-        receipt.innerHTML = `<div class="error-state">${escape(error.message)}</div><p class="muted">No earlier held-out year or project is being reused. Retry the requested range to create a fresh comparison session.</p>`;
+        receipt.innerHTML = `<div class="error-state">${escape(error.message)}</div><p class="muted">No earlier held-out year or project is being reused. Retry the requested range to create a fresh session.</p>`;
       } finally {
         trainButton.disabled = false;
       }
     });
-  }
 
   testYear.addEventListener('change', () => loadProjects().catch((error) => {
     projectRows = [];
@@ -289,9 +325,11 @@ export async function ModelSimulationPage(root) {
     if (!session || project.disabled) return;
     resetPrediction();
     try {
-      prediction = await api.predictComparison(session.comparison_session_id || session.session_id, Number(project.value));
+      prediction = comparisonMode
+        ? await api.predictComparison(session.comparison_session_id || session.session_id, Number(project.value))
+        : await api.predictCustomSimulation(session.session_id, Number(project.value));
       revealButton.disabled = false;
-      output.innerHTML = predictionCard(prediction);
+      output.innerHTML = comparisonMode ? predictionCard(prediction) : productionPredictionCard(prediction);
     } catch (error) {
       output.innerHTML = `<div class="error-state">${escape(error.message)}</div>`;
     }
@@ -305,8 +343,10 @@ export async function ModelSimulationPage(root) {
     if (!session || !prediction) return;
     revealButton.disabled = true;
     try {
-      const actual = await api.revealComparison(session.comparison_session_id || session.session_id, prediction.record_index);
-      output.innerHTML = predictionCard(prediction, actual);
+      const actual = comparisonMode
+        ? await api.revealComparison(session.comparison_session_id || session.session_id, prediction.record_index)
+        : await api.revealCustomSimulation(session.session_id, prediction.record_index);
+      output.innerHTML = comparisonMode ? predictionCard(prediction, actual) : productionPredictionCard(prediction, actual);
     } catch (error) {
       output.innerHTML += `<div class="error-state">${escape(error.message)}</div>`;
       revealButton.disabled = false;

@@ -1,6 +1,6 @@
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const DEFAULT_TIMEOUT_MS = 45000;
-const HEAVY_TIMEOUT_MS = 30 * 60 * 1000;
+const HEAVY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const COMPARE_TIMEOUT_MS = 60 * 60 * 1000;
 const SELECTED_MODEL_KEY = 'selected_validation_model';
 const ACTIVE_LIFECYCLE_KEY = 'active_lifecycle_run';
@@ -22,7 +22,7 @@ async function request(path, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     return response.json();
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new Error('Request timed out before the backend returned the completed model run. The current page has discarded the pending session; retry the requested range.');
+      throw new Error('Retraining is still running after the browser wait limit. The server may still be completing this run; wait for it to finish before starting another retrain.');
     }
     throw error;
   } finally {
