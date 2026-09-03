@@ -49,6 +49,7 @@ from backend.app.ml.production_cost_baseline import (
 )
 from backend.app.ml.production_exp35_baseline import (
     CALIBRATION_GATE_FEATURE,
+    _aft_routing_limit,
     _select_aft_calibration_projects,
 )
 from backend.app.ml.production_exp61_baseline import _build_temporal_delay_priors
@@ -631,7 +632,10 @@ def train_window_with_promoted_cost_and_delay(
     train, test = temporal_project_split(prepared, training_start, training_end, test_end)
     prior_train, prior_test, _ = _build_temporal_delay_priors(train, test)
     cohort = _production_cost_evaluation_rows(prior_test).copy()
-    calibration_ids = _select_aft_calibration_projects(cohort)
+    calibration_ids = _select_aft_calibration_projects(
+        cohort,
+        limit=_aft_routing_limit(training_start, training_end, test_end),
+    )
     cohort[CALIBRATION_GATE_FEATURE] = cohort["canonical_project_id"].astype("string").isin(calibration_ids)
     cohort = assign_project_balanced_weights(cohort)
 
