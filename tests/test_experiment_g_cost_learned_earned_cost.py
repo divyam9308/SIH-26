@@ -38,3 +38,16 @@ def test_spend_above_learned_curve_has_positive_gap():
     score=pd.DataFrame({"physical_progress":[50.0],"expenditure_ratio":[2.0],"sector":["Roads"]})
     out=attach_earned_cost(train,score)
     assert out.loc[0,"exp_g_spend_vs_norm"] > 0
+
+
+def test_curve_inputs_reconstruct_from_same_snapshot_components():
+    train=_train().drop(columns=["physical_progress", "expenditure_ratio"])
+    progress=np.tile(np.arange(5.0,105.0,5.0),4)
+    train["expected_progress_percentage"]=progress-3.0
+    train["progress_deviation"]=3.0
+    train["approved_cost_cr"]=100.0
+    train["cumulative_expenditure_cr"]=100.0*(0.15+(progress/100.0)**1.4)
+    score=train.iloc[:5].copy()
+    out=attach_earned_cost(train,score)
+    assert out["exp_g_expected_spend_ratio"].notna().all()
+    assert out["exp_g_spend_vs_norm"].notna().all()
