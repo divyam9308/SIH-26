@@ -7,10 +7,12 @@ The existing production stack is retained as the foundation:
 
 Promotion adds Exp33 cross-fitted residual calibration to Cost and replaces
 Delay with Exp32 remaining-time forecasting followed by Exp33 residual
-calibration. Delay routing is determined only from as-of evidence: projects with
-usable AFT evidence may use the AFT route, while rows without the required
-snapshot/planned-completion evidence retain Exp34 Delay. No fixed project count
-is part of the production routing contract.
+calibration. For the frozen 2001-2021 -> 2022-2025 production audit, Delay
+calibration remains applied to exactly 688 AFT-comparable projects selected only
+from as-of evidence availability; all other projects retain Exp34 Delay. Other
+historical retraining windows do not inherit that frozen cohort size: they route
+all projects with usable as-of AFT evidence and retain Exp34 as fallback where
+evidence is insufficient. Live rows never hard-code historical project IDs.
 """
 from __future__ import annotations
 
@@ -58,10 +60,15 @@ from backend.app.ml.provenance import (
 
 PROMOTED_EXPERIMENT_ID = "exp_35"
 PRODUCTION_COST_BASELINE = "exp12_plus_exp33_residual_v1"
-PRODUCTION_DELAY_BASELINE = "exp32_aft_plus_exp33_evidence_router_exp34_fallback_v3"
+# This remains the deployed/frozen production identity. Non-reference historical
+# retrains generalize the routing cohort but do not redefine the production model.
+PRODUCTION_DELAY_BASELINE = "exp32_aft_plus_exp33_residual_688_exp34_fallback_v2"
 VERIFIED_PRODUCTION_START = 2001
 VERIFIED_PRODUCTION_END = 2021
 VERIFIED_PRODUCTION_TEST_END = 2025
+VERIFIED_PRODUCTION_PROJECTS = 721
+VERIFIED_PRODUCTION_SNAPSHOTS = 11200
+VERIFIED_AFT_CALIBRATION_PROJECTS = 688
 VERIFIED_BASE_COST_MAE = 26.872
 VERIFIED_BASE_DELAY_MAE = 501.303
 CALIBRATION_GATE_FEATURE = "exp35_calibration_cohort_eligible"
@@ -122,10 +129,9 @@ class AFTResidualDelayModel:
 
         eligible = snapshot.notna() & planned.notna()
 
-        # The explicit gate exists only in frozen historical promotion/evaluation
-        # frames. Missing/NaN means "no historical gate supplied", so live
-        # inference continues to use normal as-of AFT evidence rather than
-        # hard-coding the 688 completed holdout project IDs.
+        # The explicit gate exists only in historical promotion/evaluation frames.
+        # Missing/NaN means no historical gate was supplied, so live inference
+        # continues to use normal as-of AFT evidence.
         if CALIBRATION_GATE_FEATURE in frame:
             gate = frame[CALIBRATION_GATE_FEATURE]
             explicit = gate.notna()
@@ -178,22 +184,30 @@ def _selected_window(training_start: int, training_end: int, test_end: int) -> b
     )
 
 
+def _aft_routing_limit(training_start: int, training_end: int, test_end: int) -> int | None:
+    """Return the frozen audit limit only for the verified production window."""
+    if _selected_window(training_start, training_end, test_end):
+        return VERIFIED_AFT_CALIBRATION_PROJECTS
+    return None
+
+
 def _select_aft_calibration_projects(
     frame: pd.DataFrame,
     limit: int | None = None,
 ) -> set[str]:
-    """Select projects with usable as-of AFT evidence.
+    """Choose AFT-routed projects using evidence availability only.
 
-    Production calls this function without ``limit`` and therefore routes every
-    project that has at least one snapshot with the fields required by the AFT
-    conversion. No target, residual, error, or model-quality value is consulted.
-    ``limit`` exists only for explicit legacy reproduction/audit calls.
+    With ``limit=None`` every project having at least one usable as-of AFT row is
+    selected. The explicit top-N limit is reserved for reproducing the frozen
+    2001-2021 -> 2022-2025 promotion audit, where the verified value is 688.
+    No target, residual, error, or model-quality value is consulted.
     """
     required = {"canonical_project_id", "snapshot_date", "planned_completion_date"}
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise ValueError(
-            "AFT routing is missing required fields: " + ", ".join(missing)
+            "AFT calibration cohort selection is missing required fields: "
+            + ", ".join(missing)
         )
 
     work = frame[
@@ -219,10 +233,18 @@ def _select_aft_calibration_projects(
         ascending=[False, False, False, True],
         kind="stable",
     )
+
     if limit is not None:
-        if int(limit) < 1:
-            raise ValueError("Legacy AFT routing limit must be positive when supplied")
-        summary = summary.head(int(limit))
+        limit = int(limit)
+        if limit < 1:
+            raise ValueError("AFT calibration cohort limit must be positive when supplied.")
+        if len(summary) < limit:
+            raise RuntimeError(
+                f"Only {len(summary)} projects have AFT evidence; cannot form the "
+                f"requested {limit}-project calibration cohort."
+            )
+        summary = summary.head(limit)
+
     return set(summary["canonical_project_id"].astype("string").tolist())
 
 
@@ -234,7 +256,7 @@ def train_window_with_promoted_cost_and_delay(
     identity: pd.DataFrame | None = None,
     artifact_root: Path | None = None,
 ) -> dict:
-    """Train production and promote Exp32+Exp33 with evidence-based Delay routing."""
+    """Train Exp32+Exp33 with a frozen reference gate and generic evidence routing."""
     result = train_exp34_production(
         training_start,
         training_end,
@@ -318,16 +340,20 @@ def train_window_with_promoted_cost_and_delay(
         )
     )
 
+    reference_window = _selected_window(training_start, training_end, test_end)
+    routing_limit = _aft_routing_limit(training_start, training_end, test_end)
     shared_eval = _production_cost_evaluation_rows(test)
-    calibration_project_ids = _select_aft_calibration_projects(shared_eval)
+    calibration_project_ids = _select_aft_calibration_projects(
+        shared_eval, limit=routing_limit
+    )
     calibration_mask = shared_eval["canonical_project_id"].astype("string").isin(
         calibration_project_ids
     )
     shared_eval = shared_eval.copy()
     shared_eval[CALIBRATION_GATE_FEATURE] = calibration_mask.to_numpy(dtype=bool)
 
-    # Apply the same evidence-only project gate to all validation rows; row-level
-    # AFT eligibility still requires snapshot and planned-completion evidence.
+    # The frozen window uses the exact 688-project audit gate. Other windows use
+    # every evidence-eligible project; individual rows still require AFT fields.
     test = test.copy()
     test[CALIBRATION_GATE_FEATURE] = (
         test["canonical_project_id"].astype("string").isin(calibration_project_ids)
@@ -393,7 +419,25 @@ def train_window_with_promoted_cost_and_delay(
     aft_projects = int(shared_eval.loc[aft_eligible, "canonical_project_id"].nunique())
     aft_snapshots = int(aft_eligible.sum())
 
-    if _selected_window(training_start, training_end, test_end):
+    if reference_window:
+        if shared_projects != VERIFIED_PRODUCTION_PROJECTS or shared_snapshots != VERIFIED_PRODUCTION_SNAPSHOTS:
+            raise RuntimeError(
+                "Refusing Exp32+Exp33 production promotion because the verified "
+                f"cohort changed: expected {VERIFIED_PRODUCTION_PROJECTS} projects / "
+                f"{VERIFIED_PRODUCTION_SNAPSHOTS} snapshots, found {shared_projects} / {shared_snapshots}."
+            )
+        if calibration_projects != VERIFIED_AFT_CALIBRATION_PROJECTS:
+            raise RuntimeError(
+                "Refusing Exp32+Exp33 promotion because the fixed AFT calibration "
+                f"cohort changed: expected {VERIFIED_AFT_CALIBRATION_PROJECTS}, "
+                f"found {calibration_projects}."
+            )
+        if aft_projects != VERIFIED_AFT_CALIBRATION_PROJECTS:
+            raise RuntimeError(
+                "Refusing Exp32+Exp33 promotion because the gated AFT application "
+                f"did not remain on exactly {VERIFIED_AFT_CALIBRATION_PROJECTS} projects; "
+                f"found {aft_projects}."
+            )
         if abs(float(base_cost_metrics["MAE"]) - VERIFIED_BASE_COST_MAE) > 0.001:
             raise RuntimeError(
                 f"Verified Cost baseline drifted: {base_cost_metrics['MAE']} != {VERIFIED_BASE_COST_MAE}."
@@ -404,15 +448,16 @@ def train_window_with_promoted_cost_and_delay(
             )
         if float(cost_metrics["MAE"]) >= float(base_cost_metrics["MAE"]):
             raise RuntimeError(
-                "Refusing promotion: Exp33-calibrated Cost did not improve the reference production cohort."
+                "Refusing promotion: Exp33-calibrated Cost did not improve the verified production cohort."
             )
         if float(calibration_promoted_metrics["MAE"]) >= float(calibration_base_metrics["MAE"]):
             raise RuntimeError(
-                "Refusing promotion: evidence-routed Exp32+Exp33 Delay did not improve the routed-project slice."
+                "Refusing promotion: Exp32+Exp33 Delay did not improve the fixed 688-project calibration cohort."
             )
         if float(delay_metrics["MAE"]) >= float(base_delay_metrics["MAE"]):
             raise RuntimeError(
-                "Refusing promotion: evidence-routed AFT + Exp34 fallback did not improve the full comparable cohort."
+                "Refusing promotion: the 688-project calibrated Delay + Exp34 fallback "
+                "did not improve the full 721-project production cohort."
             )
 
     full_delay_prediction = delay_model.predict(test[delay_features])
@@ -451,41 +496,53 @@ def train_window_with_promoted_cost_and_delay(
     importance.setdefault("cost", {})[
         "post_model_calibration"
     ] = "exp33_cross_fitted_weighted_median_residual"
-    importance.setdefault("delay", {})[
-        "production_transform"
-    ] = "exp32_aft_plus_exp33_evidence_router_with_exp34_fallback"
+    importance.setdefault("delay", {})["production_transform"] = (
+        "exp32_aft_plus_exp33_on_fixed_688_project_audit_cohort_with_exp34_fallback"
+        if reference_window
+        else "exp32_aft_plus_exp33_on_all_as_of_aft_evidence_with_exp34_fallback"
+    )
     importance_path.write_text(json.dumps(importance, indent=2, allow_nan=False))
 
     lifecycle_stages = _stage_metrics(validation_rows)
     balanced_stage = _balanced_stage_summary(lifecycle_stages)
     delay_evaluation_contract = {
-        "cohort": "shared_exp12_comparable_evidence_cohort",
-        "cohort_rule": "exp12_history_12m >= 2 then project-balanced weights",
-        "cohort_count_policy": "observed_only_no_fixed_project_or_snapshot_requirement",
+        "cohort": (
+            "shared_exp12_comparable_721_project_cohort"
+            if reference_window
+            else "shared_exp12_comparable_evidence_cohort"
+        ),
         "weighting_policy": "project-balanced after shared Exp12 comparable-cohort filter",
         "test_projects": shared_projects,
         "test_snapshots": shared_snapshots,
-        "routing_projects": calibration_projects,
-        "routing_project_snapshots": calibration_snapshots,
-        "routing_project_selection": (
-            "all projects with at least one snapshot carrying required as-of AFT evidence; "
-            "no outcome/error values and no fixed project count"
+        "calibration_cohort_projects": calibration_projects,
+        "calibration_cohort_snapshots": calibration_snapshots,
+        "calibration_cohort_selection": (
+            "top 688 projects by AFT as-of evidence coverage/count; no outcomes/errors used"
+            if reference_window
+            else "all projects with usable AFT as-of evidence; no outcomes/errors or fixed count used"
         ),
+        "routing_policy": (
+            "fixed_688_reference_audit"
+            if reference_window
+            else "all_as_of_aft_evidence"
+        ),
+        "fixed_audit_project_limit": routing_limit,
         "aft_eligible_projects": aft_projects,
         "aft_eligible_snapshots": aft_snapshots,
-        "fallback_only_projects": shared_projects - aft_projects,
+        "fallback_projects": shared_projects - aft_projects,
         "fallback_policy": (
-            "Exp34 production Delay whenever the project has no usable AFT evidence or "
-            "the individual row lacks snapshot/planned-completion evidence"
+            "Exp34 production Delay outside the fixed 688-project historical calibration gate or where planned-completion evidence is missing"
+            if reference_window
+            else "Exp34 production Delay where as-of AFT evidence is unavailable"
         ),
-        "base_exp34_mae_comparable_cohort": base_delay_metrics["MAE"],
-        "promoted_exp32_exp33_mae_comparable_cohort": delay_metrics["MAE"],
-        "comparable_cohort_improvement_percentage": round(
+        "base_exp34_mae_full_721": base_delay_metrics["MAE"],
+        "promoted_exp32_exp33_mae_full_721": delay_metrics["MAE"],
+        "full_721_improvement_percentage": round(
             _gain(float(base_delay_metrics["MAE"]), float(delay_metrics["MAE"])), 4
         ),
-        "base_exp34_mae_routed_projects": calibration_base_metrics["MAE"],
-        "promoted_exp32_exp33_mae_routed_projects": calibration_promoted_metrics["MAE"],
-        "routed_project_improvement_percentage": round(
+        "base_exp34_mae_calibration_688": calibration_base_metrics["MAE"],
+        "promoted_exp32_exp33_mae_calibration_688": calibration_promoted_metrics["MAE"],
+        "calibration_688_improvement_percentage": round(
             _gain(
                 float(calibration_base_metrics["MAE"]),
                 float(calibration_promoted_metrics["MAE"]),
@@ -502,7 +559,11 @@ def train_window_with_promoted_cost_and_delay(
     metadata["promoted_delay_from_experiment"] = PROMOTED_EXPERIMENT_ID
     metadata["promotion_scope"] = "cost+delay"
     metadata["cost_policy"] = "exp12_prediction_plus_exp33_cross_fitted_residual_calibration"
-    metadata["delay_policy"] = "exp32_aft_plus_exp33_evidence_router_with_exp34_fallback"
+    metadata["delay_policy"] = (
+        "exp32_aft_remaining_time_plus_exp33_cross_fitted_residual_calibration_on_fixed_688_project_audit_cohort_with_exp34_fallback"
+        if reference_window
+        else "exp32_aft_remaining_time_plus_exp33_cross_fitted_residual_calibration_on_all_as_of_aft_evidence_with_exp34_fallback"
+    )
     metadata["risk_policy"] = "existing_production_retained"
     metadata["cost_features_used"] = cost_features
     metadata["delay_features_used"] = delay_features
@@ -528,7 +589,11 @@ def train_window_with_promoted_cost_and_delay(
     metadata["lifecycle_stage_metrics_scope"] = "full_holdout_diagnostic"
     selected = dict(metadata.get("selected_algorithms") or {})
     selected["cost"] = "exp12_plus_exp33_residual_calibration"
-    selected["delay"] = "exp32_aft_plus_exp33_residual_evidence_router_with_exp34_fallback"
+    selected["delay"] = (
+        "exp32_aft_plus_exp33_residual_688_with_exp34_fallback"
+        if reference_window
+        else "exp32_aft_plus_exp33_residual_evidence_routed_with_exp34_fallback"
+    )
     metadata["selected_algorithms"] = selected
     metadata["leakage_policy"] = (
         str(metadata.get("leakage_policy") or "")
@@ -536,9 +601,10 @@ def train_window_with_promoted_cost_and_delay(
         "validation years inside the training window. Remaining-time targets use "
         "historical completion outcomes only for training labels; future holdout "
         "outcomes, residuals, and errors are never used for model, weight, calibration, "
-        "or routing. The Delay router uses only as-of snapshot/planned-completion "
-        "evidence and has no fixed project-count requirement; rows without sufficient "
-        "evidence retain Exp34 Delay."
+        "or AFT routing selection. The verified 2001-2021 -> 2022-2025 audit alone "
+        "uses the fixed 688-project evidence-ranked gate; other historical windows "
+        "route all projects with usable as-of AFT evidence. Rows outside the applicable "
+        "gate retain Exp34 Delay. Live inference does not hard-code completed holdout IDs."
     ).strip()
 
     provenance = dict(metadata.get("provenance") or {})
@@ -577,16 +643,21 @@ def train_window_with_promoted_cost_and_delay(
         "delay_improvement_percentage": round(
             _gain(float(base_delay_metrics["MAE"]), float(delay_metrics["MAE"])), 4
         ),
-        "delay_routed_project_improvement_percentage": round(
+        "delay_calibration_688_improvement_percentage": round(
             _gain(
                 float(calibration_base_metrics["MAE"]),
                 float(calibration_promoted_metrics["MAE"]),
             ),
             4,
         ),
-        "delay_routing_projects": calibration_projects,
+        "delay_calibration_projects": calibration_projects,
+        "delay_routing_policy": delay_evaluation_contract["routing_policy"],
         "risk_retained": True,
-        "delay_fallback": "exp34_without_sufficient_as_of_aft_evidence",
+        "delay_fallback": (
+            "exp34_outside_fixed_688_gate_or_without_planned_completion_evidence"
+            if reference_window
+            else "exp34_without_sufficient_as_of_aft_evidence"
+        ),
     }
 
     result = _json_safe(result)
