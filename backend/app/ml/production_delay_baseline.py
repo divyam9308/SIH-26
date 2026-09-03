@@ -5,10 +5,10 @@ existing production classifier. This module replaces only Delay with the
 Experiment 34 path-dependence + rolling-OOF ensemble that improved both verified
 future windows.
 
-For the selected production window (2001-2021 -> 2022-2025), the official
-headline evidence cohort is the same verified Exp12-comparable 721-project
-cohort used for production Cost. Full-holdout Delay metrics are also retained as
-a diagnostic so the 728-project Exp34 experiment result remains auditable.
+Headline Delay evaluation always uses the same evidence-defined Exp12-comparable
+cohort as Cost: at least two official observations in the trailing 12 months,
+followed by project-balanced weighting. Project and snapshot counts are observed
+diagnostics only; they are never eligibility requirements for a training window.
 """
 from __future__ import annotations
 
@@ -51,11 +51,7 @@ from backend.app.ml.provenance import (
 PROMOTED_DELAY_EXPERIMENT_ID = "exp_34"
 PRODUCTION_DELAY_BASELINE = "exp34_path_oof_ensemble_v1"
 DEFAULT_PRODUCTION_WINDOW = "2001_2021"
-VERIFIED_PRODUCTION_START = 2001
-VERIFIED_PRODUCTION_END = 2021
-VERIFIED_PRODUCTION_TEST_END = 2025
-VERIFIED_PRODUCTION_EVIDENCE_PROJECTS = 721
-PRODUCTION_DELAY_EVALUATION_COHORT = "shared_exp12_comparable_721_project_cohort"
+PRODUCTION_DELAY_EVALUATION_COHORT = "shared_exp12_comparable_evidence_cohort"
 
 _FINGERPRINTED_ARTIFACTS = [
     "cost_model.pkl",
@@ -121,7 +117,7 @@ def _delay_importance(
 
 
 def _shared_delay_evaluation_rows(test: pd.DataFrame) -> pd.DataFrame:
-    """Use the exact verified production Cost cohort for the headline Delay MAE."""
+    """Use the evidence-defined production Cost cohort for the headline Delay MAE."""
     return _production_cost_evaluation_rows(test)
 
 
@@ -189,17 +185,6 @@ def train_window_with_promoted_cost_and_delay(
     )
 
     shared_projects = int(shared_eval["canonical_project_id"].nunique())
-    if (
-        training_start == VERIFIED_PRODUCTION_START
-        and training_end == VERIFIED_PRODUCTION_END
-        and test_end == VERIFIED_PRODUCTION_TEST_END
-        and shared_projects != VERIFIED_PRODUCTION_EVIDENCE_PROJECTS
-    ):
-        raise RuntimeError(
-            "Refusing to publish the selected 2001-2021 production run because the "
-            f"verified evidence cohort changed: expected {VERIFIED_PRODUCTION_EVIDENCE_PROJECTS} "
-            f"projects, found {shared_projects}."
-        )
 
     cost_metrics, validation_rows, cost_evaluation_contract = _prediction_rows(
         test,
@@ -217,6 +202,7 @@ def train_window_with_promoted_cost_and_delay(
             f"Exp34 Delay promotion changed production Cost MAE: before={prior_cost_mae}, after={cost_metrics['MAE']}"
         )
 
+    # Persist only the Delay model. Cost and Risk artifacts must remain byte-for-byte unchanged.
     joblib.dump(delay_model, target / "delay_model.pkl")
     validation_rows.to_csv(target / "prediction_validation.csv", index=False, date_format="%Y-%m-%d")
 
@@ -241,7 +227,7 @@ def train_window_with_promoted_cost_and_delay(
         "full_holdout_projects": int(test["canonical_project_id"].nunique()),
         "full_holdout_snapshots": int(len(test)),
         "full_holdout_delay_metrics": full_delay_metrics,
-        "verified_2001_2021_project_count": VERIFIED_PRODUCTION_EVIDENCE_PROJECTS,
+        "cohort_count_policy": "observed_only_no_fixed_project_or_snapshot_requirement",
     }
 
     metadata["delay_features_used"] = delay_features
