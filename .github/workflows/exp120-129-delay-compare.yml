@@ -6,6 +6,7 @@ on:
       - 'backend/app/ml/experiments/exp12*_delay.py'
       - 'backend/app/ml/experiments/post_exp113_delay_common.py'
       - 'backend/app/ml/experiments/run_exp120_129.py'
+      - 'backend/app/ml/production_exp105_exp113_fast.py'
       - '.github/workflows/exp120-129-delay-compare.yml'
   workflow_dispatch:
 
@@ -16,13 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      # Six strict-forward production folds are independent. Use all four
-      # GitHub-hosted runner cores across processes and keep each production
-      # fit single-threaded to avoid nested oversubscription. This changes only
-      # orchestration/runtime; the folds, models, targets and evaluation
-      # contract remain identical.
-      POST_EXP113_OOF_WORKERS: '4'
+      # Keep the exact six strict-forward production folds, but use two outer
+      # folds at a time and two internal canonical OOF jobs per fit. On the
+      # four-core hosted runner this uses the available cores without nested
+      # oversubscription. Model/features/targets/cohorts are unchanged.
+      POST_EXP113_OOF_WORKERS: '2'
       POST_EXP113_THREADS_PER_WORKER: '1'
+      SIH_FOLD_JOBS: '2'
+      SIH_MODEL_THREADS: '1'
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +41,7 @@ jobs:
           echo "EXP=$EXP" >> "$GITHUB_ENV"
       - name: Syntax check
         run: |
-          python -m py_compile backend/app/ml/experiments/post_exp113_delay_common.py backend/app/ml/experiments/run_exp120_129.py backend/app/ml/experiments/exp${EXP}_delay.py
+          python -m py_compile backend/app/ml/production_exp105_exp113_fast.py backend/app/ml/experiments/post_exp113_delay_common.py backend/app/ml/experiments/run_exp120_129.py backend/app/ml/experiments/exp${EXP}_delay.py
       - name: Fresh production-vs-experiment comparison
         env:
           PYTHONPATH: '${{ github.workspace }}'
