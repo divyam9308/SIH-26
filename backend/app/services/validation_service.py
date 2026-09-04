@@ -11,6 +11,7 @@ from backend.app.ml.real_time_windows import active_version
 
 
 _WINDOW_VERSION = re.compile(r"^(?:monthly[-_])?(\d{4})[_-](\d{4})$")
+_CANONICAL_LIFECYCLE_ONLY_WINDOWS = frozenset({"2001_2022"})
 
 
 def _normalise_version(version: str | None) -> str | None:
@@ -33,6 +34,10 @@ def _model_path(version: str | None, *, explicit: bool) -> tuple[Path | None, st
     lifecycle = MODELS_DIR / "monthly_lifecycle" / selected
     if lifecycle.is_dir() and any((lifecycle / name).exists() for name in ("evaluation_results.json", "prediction_validation.csv", "prediction_validation.csv.gz")):
         return lifecycle, "monthly_lifecycle"
+    if selected in _CANONICAL_LIFECYCLE_ONLY_WINDOWS:
+        raise ValueError(
+            f"Canonical lifecycle evaluation for {selected} is unavailable; legacy completed-project artifacts are intentionally not selectable."
+        )
     legacy = MODELS_DIR / selected
     if legacy.is_dir() and any((legacy / name).exists() for name in ("evaluation_results.json", "prediction_validation.csv", "evaluation_results.csv")):
         return legacy, "legacy"
@@ -57,6 +62,8 @@ def _lifecycle_report(raw: dict, model_path: Path) -> dict:
     metadata.update({
         "training_start": training[0] if len(training) > 0 else None,
         "training_end": training[1] if len(training) > 1 else None,
+        "test_start": testing[0] if len(testing) > 0 else None,
+        "test_end": testing[1] if len(testing) > 1 else None,
         "evaluated_test_start": testing[0] if len(testing) > 0 else None,
         "evaluated_test_end": testing[1] if len(testing) > 1 else None,
         "training_projects": metadata.get("unique_training_projects"),

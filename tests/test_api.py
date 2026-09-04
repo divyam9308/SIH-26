@@ -1,5 +1,7 @@
 import json
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.ml.monthly_lifecycle import SNAPSHOTS, SNAPSHOTS_GZ
@@ -91,7 +93,6 @@ def test_explicit_lifecycle_validation_uses_selected_lifecycle_artifacts(tmp_pat
         "canonical_project_id,project_name,completion_year,lifecycle_stage,actual_cost_overrun_percentage,actual_delay_days,predicted_cost_overrun,predicted_delay_days,predicted_risk,actual_risk,cost_error,delay_error\n"
         "LIFE-001,Lifecycle holdout,2023,late,18.0,120.0,15.0,100.0,HIGH,CRITICAL,-3.0,-20.0\n"
     )
-    # A sentinel legacy report proves explicit lifecycle selection never falls back.
     (tmp_path / "validation_report.json").write_text(json.dumps({"cost_model": {"MAE": 2.332}}))
     monkeypatch.setattr(validation_service, "MODELS_DIR", tmp_path)
 
@@ -122,11 +123,11 @@ def test_explicit_lifecycle_validation_uses_selected_lifecycle_artifacts(tmp_pat
 
 def test_explicit_missing_model_does_not_fall_back_to_legacy_report():
     response = client.get("/api/models/validation?model=this_model_does_not_exist")
-    assert response.status_code == 404
+    assert response.status_code == 409
     assert "this_model_does_not_exist" in response.json()["detail"]
 
     rows = client.get("/api/models/prediction-validation?model=this_model_does_not_exist")
-    assert rows.status_code == 404
+    assert rows.status_code == 409
 
 
 def test_lifecycle_rolling_validation_is_honest_when_not_generated(tmp_path, monkeypatch):
@@ -171,6 +172,10 @@ def test_lifecycle_catalog_does_not_label_legacy_years_as_lifecycle(monkeypatch)
 
 
 def test_judge_controlled_backtest_hides_actual_until_reveal():
+    frozen_validation = Path(__file__).resolve().parents[1] / "models" / "monthly_lifecycle" / "2001_2021" / "prediction_validation.csv"
+    if not frozen_validation.exists():
+        pytest.skip("requires the local frozen 2001_2021 lifecycle validation artifact")
+
     trained = client.post("/api/model-simulations/custom/train", json={"start_year": 2001, "end_year": 2015})
     assert trained.status_code == 200, trained.text
     training = trained.json()

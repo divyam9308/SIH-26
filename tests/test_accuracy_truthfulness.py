@@ -9,19 +9,20 @@ from backend.app.services.lifecycle_run_service import lifecycle_runs
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_model_simulation_frontend_does_not_convert_missing_numbers_to_zero():
-    source = (ROOT / "frontend" / "src" / "pages" / "ModelSimulationPage.js").read_text()
-    assert "Number(value || 0)" not in source
-    assert "missing(value) ? 'N/A'" in source
-    assert "run_id" in source
-    assert "dataset_fingerprint" in source
+def test_migrated_frontend_has_no_stale_model_simulation_page_contract():
+    routes = (ROOT / "frontend" / "src" / "app" / "routes.tsx").read_text()
+    assert not (ROOT / "frontend" / "src" / "pages" / "ModelSimulationPage.js").exists()
+    assert not (ROOT / "frontend" / "src" / "pages" / "ModelSimulationPage.tsx").exists()
+    assert 'path="/prediction-accuracy"' in routes
 
 
-def test_prediction_accuracy_does_not_average_missing_confidence_as_zero():
-    source = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.js").read_text()
-    assert ".filter(item => item !== null && item !== undefined && item !== '')" in source
-    assert "if (leftMissing) return 1" in source
-    assert "datasetFingerprint" in source
+def test_prediction_accuracy_does_not_treat_missing_confidence_as_zero():
+    page = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.tsx").read_text()
+    service = (ROOT / "frontend" / "src" / "services" / "predictionAccuracyService.ts").read_text()
+    assert "model_confidence_percentage == null ? 'Unavailable'" in page
+    assert "typeof value === 'number' && Number.isFinite(value)" in page
+    assert "risk_probability: number | null" in service
+    assert "model_confidence_percentage: number | null" in service
 
 
 def test_registry_uses_canonical_evaluation_metadata_and_flags_poisoned_manifest(tmp_path):

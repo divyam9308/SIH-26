@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.npm-cache/
+
+.env
+.env.local
+.env.*.local
+
+*.log
+
+.DS_Store
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

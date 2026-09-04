@@ -81,8 +81,19 @@ def _bundle(window: str) -> dict:
     }
 
 
+def _inference_source_signature() -> str:
+    paths = [TRAJECTORIES] if TRAJECTORIES.exists() else [SNAPSHOTS if SNAPSHOTS.exists() else SNAPSHOTS_GZ, OUTCOMES]
+    parts = []
+    for path in paths:
+        if path.exists():
+            stat = path.stat()
+            parts.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(parts)
+
+
 @lru_cache(maxsize=1)
-def _inference_frame() -> pd.DataFrame:
+def _inference_frame_cached(source_signature: str) -> pd.DataFrame:
+    del source_signature
     if TRAJECTORIES.exists():
         frame = pd.read_csv(TRAJECTORIES, dtype={"project_id": "string"}, low_memory=False)
         frame["snapshot_date"] = pd.to_datetime(frame.snapshot_date, errors="coerce")
@@ -94,6 +105,10 @@ def _inference_frame() -> pd.DataFrame:
     frame = engineer_as_of_features(resolved, outcomes)
     frame = enrich_history_for_production(frame)
     return enrich_history_for_delay_production(frame)
+
+
+def _inference_frame() -> pd.DataFrame:
+    return _inference_frame_cached(_inference_source_signature())
 
 
 def lifecycle_project_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDOW) -> dict:
