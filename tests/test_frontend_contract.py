@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 
@@ -168,6 +169,10 @@ def test_historical_warning_events_are_snapshot_changes_not_static_risk():
 
 
 def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
+    frozen_validation = Path(__file__).resolve().parents[1] / "models" / "monthly_lifecycle" / "2001_2021" / "prediction_validation.csv"
+    if not frozen_validation.exists():
+        pytest.skip("requires the local frozen 2001_2021 lifecycle validation artifact")
+
     report = client.get("/api/models/validation", params={"model_version": "2001_2021"})
     rows = client.get("/api/models/prediction-validation", params={"model_version": "2001_2021", "limit": 1})
     importance = client.get("/api/models/importance", params={"model_version": "2001_2021"})
