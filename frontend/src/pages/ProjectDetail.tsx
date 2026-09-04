@@ -6,26 +6,19 @@ import { ApiError } from '../services/api';
 import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers, getProjectWarnings } from '../services/projectService';
 import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, WarningResponse } from '../types/api';
 import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects';
+import { shapExplanationSubject, shapFeatureLabel } from '../lib/shapFeatureLabels';
 import '../styles/projects.css';
 import { SAVED_WINDOW_STORAGE_KEY } from '../components/dashboard/FilterBar';
 
 const unavailable = 'Not reported';
 const formatDate = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : unavailable;
-const featureLabels: Record<string, string> = {
-  approved_cost_cr: 'Approved project cost', revised_cost_cr: 'Revised project cost',
-  physical_progress: 'Physical progress', physical_progress_pct: 'Physical progress',
-  financial_progress: 'Financial progress', expenditure_ratio: 'Expenditure relative to approved cost',
-  duration_ratio: 'Elapsed time relative to planned duration', schedule_slippage_days: 'Existing schedule slippage',
-  cost_escalation_percentage: 'Recorded cost escalation', sector: 'Project sector', ministry: 'Line ministry',
-  implementing_agency: 'Implementing agency',
-};
-const featureLabel = (value: string) => featureLabels[value] ?? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const featureLabel = shapFeatureLabel;
 const isUsableFactors = (factors: ShapFactor[]) => factors.some((factor) => factor.direction !== 'not available' || factor.impact !== 0);
 const factorSentence = (factor: ShapFactor, target: 'cost' | 'delay' | 'risk', risk?: string | null) => {
-  const label = featureLabel(factor.feature).toLowerCase();
-  if (target === 'risk') return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'pushed the model toward' : 'pushed the model away from'} the predicted ${risk ?? ''} risk category.`;
-  const prediction = target === 'cost' ? 'cost-overrun estimate' : 'delay prediction';
-  return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'increased' : 'reduced'} the model's predicted ${prediction}.`;
+  const subject = shapExplanationSubject(factor.feature);
+  if (target === 'risk') return `${subject} ${factor.impact >= 0 ? 'pushed the prediction toward' : 'pushed the prediction away from'} the ${risk ?? 'predicted'} risk category.`;
+  const prediction = target === 'cost' ? 'predicted cost overrun' : 'predicted delay';
+  return `${subject} ${factor.impact >= 0 ? 'increased' : 'reduced'} the ${prediction}.`;
 };
 
 function Field({ label, value, accent = '' }: { label: string; value: string; accent?: string }) {
