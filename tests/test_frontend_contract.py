@@ -146,3 +146,17 @@ def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
     assert report.json()["metadata"]["test_end"] == 2025
     assert rows.json()["model_version"] == "2001_2021"
     assert importance.json()["model_version"] == "monthly-2001-2021"
+
+
+def test_prediction_accuracy_legacy_window_exposes_its_own_holdout_artifacts():
+    client = TestClient(app)
+    report = client.get("/api/models/validation", params={"model_version": "2001_2022"})
+    rows = client.get("/api/models/prediction-validation", params={"model_version": "2001_2022", "limit": 1})
+
+    assert report.status_code == 200
+    assert rows.status_code == 200
+    assert report.json()["model_version"] == "2001_2022"
+    assert report.json()["metadata"]["training_end"] == 2022
+    assert report.json()["metadata"]["test_start"] == 2023
+    assert rows.json()["model_version"] == "2001_2022"
+    assert rows.json()["total"] == 42

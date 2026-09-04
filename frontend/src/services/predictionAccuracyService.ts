@@ -2,8 +2,8 @@ import { apiGet } from './api';
 
 export interface ValidationReport {
   model_version: string;
-  cost_model: { MAE: number; RMSE: number; R2: number; MAPE: number };
-  delay_model: { MAE: number; MAE_days?: number; RMSE: number; R2: number; MAPE?: number };
+  cost_model: { MAE: number; RMSE?: number; R2?: number; MAPE?: number };
+  delay_model: { MAE: number; MAE_days?: number; RMSE?: number; R2?: number; MAPE?: number };
   risk_model: { accuracy: number; precision?: number; macro_precision?: number; recall?: number; macro_recall?: number; f1?: number; macro_f1?: number };
   metadata: { training_start: number; training_end: number; test_start: number; test_end: number; testing_samples?: number; data_source?: string; validation_method?: string; features_used?: string[]; confidence_calibration_status?: string };
 }
@@ -17,7 +17,7 @@ export interface ModelImportance { feature: string; importance: number }
 export interface PredictionAccuracyData {
   report: ValidationReport; rows: ValidationRow[]; total: number;
   rolling: { model_version: string; folds: RollingFold[]; fold_count: number; policy?: string };
-  importance: { model_version: string; cost_model: ModelImportance[]; delay_model: ModelImportance[]; risk_model: ModelImportance[] };
+  importance: { model_version: string; cost_model: ModelImportance[]; delay_model: ModelImportance[]; risk_model: ModelImportance[] } | null;
 }
 
 export async function getPredictionAccuracyData(window: string, signal?: AbortSignal): Promise<PredictionAccuracyData> {
@@ -26,7 +26,11 @@ export async function getPredictionAccuracyData(window: string, signal?: AbortSi
     apiGet<ValidationReport>(`/api/models/validation${query}`, signal),
     apiGet<{ model_version: string; items: ValidationRow[]; total: number }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}`, signal),
     apiGet<PredictionAccuracyData['rolling']>(`/api/models/rolling-validation${query}`, signal),
-    apiGet<PredictionAccuracyData['importance']>(`/api/models/importance${query}`, signal),
+    apiGet<NonNullable<PredictionAccuracyData['importance']>>(`/api/models/importance${query}`, signal)
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === 'AbortError') throw reason;
+        return null;
+      }),
   ]);
   return { report, rows: evidence.items, total: evidence.total, rolling, importance };
 }
