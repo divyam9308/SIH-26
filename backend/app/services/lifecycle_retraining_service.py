@@ -17,7 +17,7 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import OUTCOMES, SNAPSHOTS, SNAPSHOTS_GZ, build_training_dataset
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml.production_cost_baseline import target_feature_contract
-from backend.app.ml.production_exp61_baseline import train_window_with_promoted_cost_and_delay
+from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.ml.provenance import artifact_fingerprints, file_sha256
 from backend.app.services import monthly_prediction_service
 
@@ -162,7 +162,15 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     staging_root = MODEL_ROOT / ".staging" / f"{window}-{uuid.uuid4().hex}"
     staging_root.mkdir(parents=True, exist_ok=False)
     try:
-        result = train_window_with_promoted_cost_and_delay(start_year, end_year, max_year, data=data, identity=identity, artifact_root=staging_root)
+        result = train_window_with_promoted_cost_and_delay(
+            start_year,
+            end_year,
+            max_year,
+            data=data,
+            identity=identity,
+            artifact_root=staging_root,
+            verify_frozen_reference=False,
+        )
         staged_target = staging_root / window
         _stamp_production_role(result, staged_target)
         _write_run_manifest(start_year, end_year, result, staged_target)

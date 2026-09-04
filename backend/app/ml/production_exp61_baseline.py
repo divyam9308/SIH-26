@@ -168,8 +168,17 @@ def train_window_with_promoted_cost_and_delay(
     data: pd.DataFrame | None = None,
     identity: pd.DataFrame | None = None,
     artifact_root: Path | None = None,
+    verify_frozen_reference: bool = True,
 ) -> dict:
-    result = train_previous_production(training_start, training_end, test_end, data=data, identity=identity, artifact_root=artifact_root)
+    result = train_previous_production(
+        training_start,
+        training_end,
+        test_end,
+        data=data,
+        identity=identity,
+        artifact_root=artifact_root,
+        verify_frozen_reference=verify_frozen_reference,
+    )
     if data is None:
         raise ValueError("Exp61 production promotion requires the frozen supervised frame")
 

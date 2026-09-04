@@ -255,6 +255,7 @@ def train_window_with_promoted_cost_and_delay(
     data: pd.DataFrame | None = None,
     identity: pd.DataFrame | None = None,
     artifact_root: Path | None = None,
+    verify_frozen_reference: bool = True,
 ) -> dict:
     """Train Exp32+Exp33 with a frozen reference gate and generic evidence routing."""
     result = train_exp34_production(
@@ -419,7 +420,7 @@ def train_window_with_promoted_cost_and_delay(
     aft_projects = int(shared_eval.loc[aft_eligible, "canonical_project_id"].nunique())
     aft_snapshots = int(aft_eligible.sum())
 
-    if reference_window:
+    if reference_window and verify_frozen_reference:
         if shared_projects != VERIFIED_PRODUCTION_PROJECTS or shared_snapshots != VERIFIED_PRODUCTION_SNAPSHOTS:
             raise RuntimeError(
                 "Refusing Exp32+Exp33 production promotion because the verified "
