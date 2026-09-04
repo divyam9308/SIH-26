@@ -3,8 +3,8 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { AlertTriangle, ArrowLeft, Clock, IndianRupee, Radar, TrendingUp } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../services/api';
-import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers } from '../services/projectService';
-import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor } from '../types/api';
+import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers, getProjectWarnings } from '../services/projectService';
+import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, WarningResponse } from '../types/api';
 import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects';
 import '../styles/projects.css';
 import { SAVED_WINDOW_STORAGE_KEY } from '../components/dashboard/FilterBar';
@@ -18,8 +18,8 @@ function Field({ label, value, accent = '' }: { label: string; value: string; ac
   return <div className="detail-field"><dt>{label}</dt><dd className={accent} title={value}>{value}</dd></div>;
 }
 
-function FactorList({ title, factors, tone }: { title: string; factors: ShapFactor[] | undefined; tone: string }) {
-  if (!factors || !isUsableFactors(factors)) return <section className="risk-why-section"><h3>{title}</h3><p className="section-unavailable">SHAP explanation unavailable for this model response.</p></section>;
+function FactorList({ title, factors, status, tone }: { title: string; factors: ShapFactor[] | undefined; status?: CapabilityStatus; tone: string }) {
+  if (!factors || !isUsableFactors(factors)) return <section className="risk-why-section"><h3>{title}</h3><p className="section-unavailable">{status?.reason ?? 'SHAP explanation unavailable for this model response.'}</p></section>;
   const maximum = Math.max(...factors.map((factor) => Math.abs(factor.impact)), 0.0001);
   return <section className="risk-why-section"><h3>{title}</h3><ol className="factor-list">{factors.map((factor, index) => <li key={`${factor.feature}-${index}`}><div className="factor-top"><span><b className="factor-index">{String(index + 1).padStart(2, '0')}</b> {featureLabel(factor.feature)}</span><span className="factor-weight">{factor.impact > 0 ? '+' : ''}{factor.impact.toFixed(4)}</span></div><div className="factor-track"><span className={`tone-${tone}`} style={{ width: `${Math.abs(factor.impact) / maximum * 100}%` }} /></div><p>{factor.direction}</p></li>)}</ol></section>;
 }
@@ -32,26 +32,29 @@ export function ProjectDetail() {
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [peers, setPeers] = useState<PeerResponse | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleForecastResponse | null>(null);
+  const [warnings, setWarnings] = useState<WarningResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [forecastStatus, setForecastStatus] = useState<string | null>(null);
   const [peerStatus, setPeerStatus] = useState<string | null>(null);
+  const [warningStatus, setWarningStatus] = useState<string | null>(null);
   const [lifecycleStatus, setLifecycleStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setProject(null); setForecast(null); setPeers(null); setLifecycle(null);
-    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setLifecycleStatus(null);
+    setLoading(true); setProject(null); setForecast(null); setPeers(null); setLifecycle(null); setWarnings(null);
+    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setWarningStatus(null); setLifecycleStatus(null);
     Promise.allSettled([
       getProject(projectId, controller.signal, selectedWindow), getProjectForecast(projectId, controller.signal, selectedWindow),
-      getProjectPeers(projectId, controller.signal),
-    ]).then(([projectResult, forecastResult, peersResult]) => {
+      getProjectPeers(projectId, controller.signal, selectedWindow), getProjectWarnings(projectId, controller.signal, selectedWindow),
+    ]).then(([projectResult, forecastResult, peersResult, warningsResult]) => {
       if (controller.signal.aborted) return;
       if (projectResult.status === 'fulfilled') setProject(projectResult.value); else setProjectError(projectResult.reason instanceof Error ? projectResult.reason.message : 'Project unavailable.');
       if (forecastResult.status === 'fulfilled') setForecast(forecastResult.value); else setForecastStatus(forecastResult.reason instanceof ApiError && forecastResult.reason.status === 409 ? `Prediction unavailable: ${forecastResult.reason.message}` : forecastResult.reason instanceof Error ? forecastResult.reason.message : 'Prediction unavailable.');
       if (peersResult.status === 'fulfilled') setPeers(peersResult.value); else setPeerStatus(peersResult.reason instanceof Error ? peersResult.reason.message : 'Peer benchmark unavailable.');
+      if (warningsResult.status === 'fulfilled') setWarnings(warningsResult.value); else setWarningStatus(warningsResult.reason instanceof Error ? warningsResult.reason.message : 'Warning events unavailable.');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    getLifecycleForecast(projectId, controller.signal)
+    getLifecycleForecast(projectId, controller.signal, selectedWindow)
       .then((result) => { if (!controller.signal.aborted) setLifecycle(result); })
       .catch((reason: unknown) => { if (!controller.signal.aborted) setLifecycleStatus(reason instanceof ApiError && [404, 409].includes(reason.status) ? 'Lifecycle history unavailable for this project.' : reason instanceof Error ? reason.message : 'Lifecycle history unavailable.'); });
     return () => controller.abort();
@@ -87,9 +90,9 @@ export function ProjectDetail() {
     <div className="detail-grid"><ProjectPanel title="Timeline Intelligence" className="span-two" action={<Clock size={16} color="var(--p-muted-foreground)" />}><dl className="detail-fields"><Field label="Project start" value={unavailable} /><Field label="Original completion" value={formatDate(project.original_end_date)} /><Field label="Latest revised completion" value={formatDate(project.revised_end_date)} /><Field label="Predicted completion" value={forecast ? formatDate(forecast.predicted_completion_date) : 'Unavailable'} accent={forecast ? tone : ''} /><Field label="Predicted time overrun" value={forecast ? `${forecast.predicted_delay_months.toFixed(1)} months` : 'Unavailable'} accent={forecast ? tone : ''} /></dl>{forecast?.expected_range && <p className="range-note">Expected delay range: {forecast.expected_range.delay_days.p10.toFixed(1)} to {forecast.expected_range.delay_days.p90.toFixed(1)} days.</p>}</ProjectPanel>
       <ProjectPanel title="Progress & Risk" action={<TrendingUp size={16} color="var(--p-muted-foreground)" />}><div className="progress-content">{[["Physical progress", progress, 'primary'], ["Financial progress", financialProgress, 'financial'], ["Implementation risk score", forecast?.risk_score ?? null, tone]].map(([label, value, color]) => <div key={String(label)}><div className="progress-label"><span>{label}</span><b className={color === tone ? tone : ''}>{value === null ? unavailable : `${Number(value).toFixed(1)}%`}</b></div><div className="progress-track">{value !== null && <span className={`tone-${color}`} style={{ width: `${Math.max(0, Math.min(100, Number(value)))}%` }} />}</div></div>)}<p className="progress-note">Missing progress values are preserved as not reported; they are not converted to zero.</p></div></ProjectPanel></div>
 
-    <ProjectPanel className="why-risk"><header className="why-risk-header"><AlertTriangle size={20} className={tone} /><div><h2>Why is this project at risk?</h2><p>{forecast?.model_scope ?? 'Prediction explanation unavailable'}</p></div></header><div className="risk-why-grid"><FactorList title="Cost SHAP factors" factors={forecast?.cost_factors} tone={tone} /><FactorList title="Delay SHAP factors" factors={forecast?.delay_factors} tone={tone} /><FactorList title="Risk SHAP factors" factors={forecast?.risk_factors} tone={tone} />
+    <ProjectPanel className="why-risk"><header className="why-risk-header"><AlertTriangle size={20} className={tone} /><div><h2>Why is this project at risk?</h2><p>{forecast?.model_scope ?? 'Prediction explanation unavailable'}</p></div></header><div className="risk-why-grid"><FactorList title="Cost SHAP factors" factors={forecast?.cost_factors} status={forecast?.cost_explanation_status} tone={tone} /><FactorList title="Delay SHAP factors" factors={forecast?.delay_factors} status={forecast?.delay_explanation_status} tone={tone} /><FactorList title="Risk SHAP factors" factors={forecast?.risk_factors} status={forecast?.risk_explanation_status} tone={tone} />
       <section className="risk-why-section"><div className="factor-top"><h3>Peer benchmark</h3><Radar size={16} color="var(--p-muted-foreground)" /></div>{peers ? <dl className="peer-metrics"><Field label="Comparable projects" value={String(peers.peer_count)} /><Field label="Median approved cost" value={inr(peers.medians.original_cost_cr)} /><Field label="Median cost escalation" value={peers.medians.cost_escalation_pct === null ? unavailable : `${peers.medians.cost_escalation_pct}%`} /><Field label="Median schedule extension" value={peers.medians.schedule_extension_days === null ? unavailable : `${peers.medians.schedule_extension_days} days`} /></dl> : <p className="section-unavailable">{peerStatus ?? 'Peer benchmark unavailable.'}</p>}</section>
-      <section className="risk-why-section"><h3>Early warning signals</h3><p className="section-unavailable">Unavailable: the backend does not provide project-specific warning events.</p></section>
+      <section className="risk-why-section"><h3>Early warning signals</h3>{warnings?.available ? (warnings.items.length ? <ol className="factor-list">{warnings.items.map((warning) => <li key={`${warning.type}-${warning.date}`}><div className="factor-top"><span>{featureLabel(warning.type)}</span><span className="factor-weight">{warning.severity}</span></div><p>{warning.message}</p></li>)}</ol> : <p className="section-unavailable">No snapshot-change warning events occurred at this evaluation snapshot.</p>) : <p className="section-unavailable">{warnings?.reason ?? warningStatus ?? 'Warning events unavailable.'}</p>}</section>
       <section className="risk-why-section"><h3>Lifecycle trajectory</h3>{lifecycle ? <dl className="peer-metrics"><Field label="Lifecycle model" value={lifecycle.model_version} /><Field label="Official snapshots" value={String(lifecycle.history_snapshots)} /><Field label="Lifecycle risk" value={lifecycle.risk_level} /><Field label="Provenance" value={lifecycle.provenance.verified ? 'Verified' : 'Unverified'} /></dl> : <p className="section-unavailable">{lifecycleStatus ?? 'Lifecycle history unavailable.'}</p>}</section>
     </div></ProjectPanel>
   </div>;

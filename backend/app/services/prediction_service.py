@@ -135,6 +135,13 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     factors = _shap_factors_for_model(cost_model, X.iloc[0]) if include_explanations else []
     delay_factors = _shap_factors_for_model(delay_model, X.iloc[0]) if include_explanations else []
     risk_factors = _shap_factors_for_model(risk_model, X.iloc[0]) if include_explanations else []
+    def explanation_status(values: list[dict]) -> dict:
+        available = bool(values) and any(value.get("direction") != "not available" for value in values)
+        return {
+            "available": available,
+            "reason": None if available else "Project-level SHAP could not be computed for this model response.",
+            "source": "live_model_local_shap" if available else None,
+        }
     current_status = {
         "snapshot_month": pd.to_datetime(project.snapshot_date).strftime("%Y-%m-%d"),
         "physical_progress_percentage": None if pd.isna(progress) else round(float(progress), 1),
@@ -163,6 +170,7 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
         "model_confidence_percentage": round(float(calibration.get("confidence_percentage", 0.0)), 1) if uncertainty else None,
         "confidence_calibration_status": calibration.get("status", "unavailable") if uncertainty else "unavailable",
         "explanation": factors, "shap_explanation": factors, "cost_factors": factors, "delay_factors": delay_factors, "risk_factors": risk_factors,
+        "cost_explanation_status": explanation_status(factors), "delay_explanation_status": explanation_status(delay_factors), "risk_explanation_status": explanation_status(risk_factors),
         "best_models": {"cost": metadata.get("algorithms", {}).get("cost", "registered model"), "delay": metadata.get("algorithms", {}).get("delay", "registered model")},
         "expected_range": expected_range,
         "completion_probabilities": _completion_probabilities(target, X, planned),

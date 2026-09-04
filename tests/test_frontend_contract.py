@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.services import portfolio_service
-from backend.app.services import range_portfolio_service
+from backend.app.services import range_portfolio_service, validation_service
 
 
 client = TestClient(app)
@@ -83,7 +83,7 @@ def test_portfolio_cache_key_includes_model_and_dataset_signatures(monkeypatch):
 
 
 def test_saved_historical_windows_expose_precomputed_project_views():
-    expected = {"2001_2017": 1233, "2001_2021": 728, "2001_2022": 489}
+    expected = {"2001_2017": 1233, "2001_2021": 728}
     for window, count in expected.items():
         summary = client.get("/api/portfolio/summary", params={"window": window})
         projects = client.get("/api/projects", params={"window": window, "page_size": 1})
@@ -134,6 +134,39 @@ def test_historical_project_detail_honours_selected_window():
     assert forecast.json()["model_version"] == item["model_version"]
 
 
+def test_historical_detail_capabilities_use_only_the_selected_frozen_window():
+    code = "N24000633"
+    window = "2001_2021"
+    record = client.get(f"/api/projects/{code}", params={"window": window})
+    forecast = client.get(f"/api/projects/{code}/forecast", params={"window": window})
+    peers = client.get(f"/api/projects/{code}/peers", params={"window": window})
+    warnings = client.get(f"/api/projects/{code}/warnings", params={"window": window})
+    assert record.status_code == forecast.status_code == peers.status_code == warnings.status_code == 200
+    assert record.json()["snapshot_date"] == forecast.json()["dataset_snapshot_date"]
+    assert forecast.json()["cost_explanation_status"] == {
+        "available": False,
+        "reason": "Project-level SHAP was not persisted for this frozen evaluation run.",
+        "source": "frozen_evaluation_ledger",
+    }
+    assert peers.json()["peer_count"] > 0
+    assert warnings.json()["source"] == "official_snapshot_trajectory"
+
+
+def test_historical_peers_do_not_fall_back_to_the_live_project_dataset():
+    response = client.get("/api/projects/N24000633/peers", params={"window": "2001_2021"})
+    assert response.status_code == 200
+    assert response.json()["peer_count"] > 0
+    assert client.get("/api/projects/N24000633/peers").status_code == 404
+
+
+def test_historical_warning_events_are_snapshot_changes_not_static_risk():
+    response = client.get("/api/projects/N24000528/warnings", params={"window": "2001_2021"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert all(item["type"] in {"revised_cost_increase", "completion_date_extended", "spend_without_physical_progress", "planned_deadline_crossed"} for item in payload["items"])
+
+
 def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
     report = client.get("/api/models/validation", params={"model_version": "2001_2021"})
     rows = client.get("/api/models/prediction-validation", params={"model_version": "2001_2021", "limit": 1})
@@ -148,15 +181,27 @@ def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
     assert importance.json()["model_version"] == "monthly-2001-2021"
 
 
-def test_prediction_accuracy_legacy_window_exposes_its_own_holdout_artifacts():
+def test_prediction_accuracy_rejects_legacy_2001_2022_artifacts_until_canonical_run_exists(monkeypatch, tmp_path):
+    monkeypatch.setattr(validation_service, "MODELS_DIR", tmp_path / "models")
+    legacy = validation_service.MODELS_DIR / "2001_2022"
+    legacy.mkdir(parents=True)
+    (legacy / "evaluation_results.json").write_text("{}")
     client = TestClient(app)
     report = client.get("/api/models/validation", params={"model_version": "2001_2022"})
     rows = client.get("/api/models/prediction-validation", params={"model_version": "2001_2022", "limit": 1})
 
-    assert report.status_code == 200
-    assert rows.status_code == 200
-    assert report.json()["model_version"] == "2001_2022"
-    assert report.json()["metadata"]["training_end"] == 2022
-    assert report.json()["metadata"]["test_start"] == 2023
-    assert rows.json()["model_version"] == "2001_2022"
-    assert rows.json()["total"] == 42
+    assert report.status_code == rows.status_code == 409
+    assert "legacy completed-project artifacts" in report.json()["detail"]
+
+
+def test_2001_2022_validation_prefers_canonical_lifecycle_artifact(monkeypatch, tmp_path):
+    root = tmp_path / "models"
+    lifecycle = root / "monthly_lifecycle" / "2001_2022"
+    legacy = root / "2001_2022"
+    lifecycle.mkdir(parents=True); legacy.mkdir(parents=True)
+    (lifecycle / "evaluation_results.json").write_text("{}")
+    (legacy / "evaluation_results.json").write_text('{"legacy": true}')
+    monkeypatch.setattr(validation_service, "MODELS_DIR", root)
+    path, family = validation_service._model_path("2001_2022", explicit=True)
+    assert path == lifecycle
+    assert family == "monthly_lifecycle"

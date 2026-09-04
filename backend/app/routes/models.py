@@ -63,8 +63,8 @@ def validation(model_version: str | None = None, model: str | None = None):
     selected = model_version or model
     try:
         return validation_report(selected)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
 
 
 @router.get("/prediction-validation")
@@ -72,8 +72,8 @@ def prediction_validation(limit: int = 100, model_version: str | None = None, mo
     selected = model_version or model
     try:
         return validation_payload(limit, selected)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
 
 
 @router.get("/rolling-validation")

@@ -1,0 +1,61 @@
+{
+  "status": "complete",
+  "model_role": "production",
+  "model_family": "monthly_lifecycle",
+  "model_version": "monthly-2001-2021",
+  "run_id": "62b7f20341144af7b01d210c8a006263",
+  "dataset_fingerprint": "daef4225ed7d7a590854c14c492a0abc8e4ac0899b7751bdf9a373ce6ffab87b",
+  "training_fingerprint": "850a1e6eea732ae205b74bbf979b3ae72599f69a79ca3e8602ed10b2f2d5aef1",
+  "test_fingerprint": "c20813f89038b562da54b32e41d8085480763855dfaf66da58fd857d79eabb69",
+  "feature_schema_fingerprint": "6980133509e5888a93ede81f9100d14afab3a42ebc0beafd2f9d28cbb1f3e4d8",
+  "source_commit": "73a28f5a36e6891db175b36e6273f6177364248b",
+  "source_dataset_files": {
+    "monthly_snapshots": "7f59cdec7ff0b85c325dc14bdcf3f39d86e1147f30a041e7af1f57f25e610a4b",
+    "completed_outcomes": "07e434e731dbde78f5002b12c4042a0ed18093b23b65de3130c413a2022de264"
+  },
+  "window": "2001_2021",
+  "training_period": [
+    2001,
+    2021
+  ],
+  "testing_period": [
+    2022,
+    2025
+  ],
+  "feature_count": 61,
+  "feature_count_by_target": {
+    "cost": 61,
+    "delay": 45,
+    "risk": 25
+  },
+  "production_cost_baseline": "exp61_plus_exp105_dynamic_factor_cost_v1",
+  "production_delay_baseline": "exp61_u1_plus_exp113_quantile_aft_delay_v1",
+  "promoted_from_experiment": "exp_61",
+  "promoted_delay_from_experiment": "exp_113",
+  "metrics": {
+    "cost_mae": 25.923,
+    "delay_mae": 342.35,
+    "risk_macro_f1": 0.459
+  },
+  "artifacts": {
+    "cost_model.pkl": true,
+    "delay_model.pkl": true,
+    "risk_model.pkl": true,
+    "metadata.json": true,
+    "evaluation_results.json": true,
+    "feature_quality_report.json": true,
+    "shap_importance.json": true,
+    "prediction_validation.csv": true
+  },
+  "artifact_fingerprints": {
+    "cost_model.pkl": "9b13955b8edd7d2ee0f254feda83354b1b424092d2e69008b07f7a04a9e75c36",
+    "delay_model.pkl": "a20d80de4b639c2bd919989de701a19b3a8c1e91e24e51d3845e8baac781b2a1",
+    "risk_model.pkl": "0ba971e581e56aafc55fef490580a8a390e5cd2e76352ba348438b64c9e9b87c",
+    "metadata.json": "30f49563ee11dad920a379488389cedae6788c8b5f24924f51586983c6a756fe",
+    "evaluation_results.json": "1f8ea454be5780a1db0440e299a97ea8ecf7eb7f4a0201bd090b1fb879584e0b",
+    "feature_quality_report.json": "0bebd2040e3c90c024789885e94d4a70654b9ce0777f7199c2ca686b32ef479d",
+    "shap_importance.json": "6b755b7355b2d775a9a8e5a7ebbbdf8134f72b8dc4049e68e33332575e083d7b",
+    "prediction_validation.csv": "cba803f6237aa35c5c91d7b85f96c811c595c49bbf49c23cf1eecc6e2bec607d"
+  },
+  "created_at": "2026-09-04T12:06:36.926033+00:00"
+}

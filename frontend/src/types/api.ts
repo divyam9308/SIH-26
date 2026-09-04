@@ -13,6 +13,7 @@ export interface ProjectRecord {
 }
 
 export interface ShapFactor { feature: string; impact: number; direction: string }
+export interface CapabilityStatus { available: boolean; reason: string | null; source: string | null }
 export interface ForecastResponse {
   project_id: string; project_name: string; model_version: string; dataset_snapshot_date: string; inference_timestamp: string;
   current_status: { snapshot_month: string; physical_progress_percentage: number | null; current_estimated_cost: number | null; expenditure_cr: number | null; planned_completion_date: string; progress_delay_percentage_points: number | null };
@@ -22,6 +23,7 @@ export interface ForecastResponse {
   risk_probability_percentage: number; risk_level: RiskLevel; model_confidence_percentage: number | null;
   confidence_calibration_status: string; explanation: ShapFactor[]; shap_explanation: ShapFactor[];
   cost_factors: ShapFactor[]; delay_factors: ShapFactor[]; risk_factors: ShapFactor[];
+  cost_explanation_status: CapabilityStatus; delay_explanation_status: CapabilityStatus; risk_explanation_status: CapabilityStatus;
   best_models: { cost: string; delay: string };
   expected_range: { cost_overrun_percentage: { p10: number; p50: number; p90: number }; delay_days: { p10: number; p50: number; p90: number } } | null;
   completion_probabilities: { year: number; probability_percentage: number }[]; features_used: string[]; model_scope: string;
@@ -65,6 +67,11 @@ export interface PeerResponse {
   sector: string; peer_count: number;
   medians: { original_cost_cr: number | null; cost_escalation_pct: number | null; schedule_extension_days: number | null; financial_progress_pct: number | null; physical_progress_pct: number | null };
   peers: { project_code: string; project_name: string; original_cost_cr: number | null; cost_escalation_pct: number | null; schedule_extension_days: number | null }[];
+}
+
+export interface WarningResponse {
+  available: boolean; reason: string | null; source: string | null;
+  items: { date: string; type: string; severity: RiskLevel; message: string }[];
 }
 
 export interface LifecycleForecastResponse {

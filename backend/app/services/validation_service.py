@@ -11,6 +11,7 @@ from backend.app.ml.real_time_windows import active_version
 
 
 _WINDOW_VERSION = re.compile(r"^(?:monthly[-_])?(\d{4})[_-](\d{4})$")
+_CANONICAL_LIFECYCLE_ONLY_WINDOWS = frozenset({"2001_2022"})
 
 
 def _normalise_version(version: str | None) -> str | None:
@@ -33,6 +34,10 @@ def _model_path(version: str | None, *, explicit: bool) -> tuple[Path | None, st
     lifecycle = MODELS_DIR / "monthly_lifecycle" / selected
     if lifecycle.is_dir() and any((lifecycle / name).exists() for name in ("evaluation_results.json", "prediction_validation.csv", "prediction_validation.csv.gz")):
         return lifecycle, "monthly_lifecycle"
+    if selected in _CANONICAL_LIFECYCLE_ONLY_WINDOWS:
+        raise ValueError(
+            f"Canonical lifecycle evaluation for {selected} is unavailable; legacy completed-project artifacts are intentionally not selectable."
+        )
     legacy = MODELS_DIR / selected
     if legacy.is_dir() and any((legacy / name).exists() for name in ("evaluation_results.json", "prediction_validation.csv", "evaluation_results.csv")):
         return legacy, "legacy"

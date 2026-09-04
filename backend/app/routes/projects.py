@@ -7,8 +7,8 @@ from backend.app.services.prediction_service import project_forecast, project_pr
 from backend.app.services.monthly_prediction_service import DEFAULT_PRODUCTION_WINDOW, lifecycle_project_forecast
 from backend.app.services.portfolio_service import SORT_FIELDS, project_page
 from backend.app.services.range_portfolio_service import RANGE_WINDOWS
-from backend.app.services.range_portfolio_service import historical_project
-from backend.app.schemas import ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectListResponse, ProjectRecord
+from backend.app.services.range_portfolio_service import historical_peer_benchmark, historical_project, historical_warnings
+from backend.app.schemas import ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectListResponse, ProjectRecord, WarningResponse
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -97,8 +97,31 @@ def lifecycle_forecast(code: str, window: str = DEFAULT_PRODUCTION_WINDOW):
         raise HTTPException(409, str(exc))
 
 @router.get("/{code}/peers", response_model=PeerResponse)
-def peers(code: str):
+def peers(code: str, window: str | None = None):
+    if window:
+        if window not in RANGE_WINDOWS:
+            raise HTTPException(422, "Unsupported historical window")
+        try:
+            return historical_peer_benchmark(code, window)
+        except KeyError:
+            raise HTTPException(404, "Project not found")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
     try:
         return peer_benchmark(code)
     except KeyError:
         raise HTTPException(404, "Project not found")
+
+
+@router.get("/{code}/warnings", response_model=WarningResponse)
+def warnings(code: str, window: str | None = None):
+    if not window:
+        return {"available": False, "reason": "Project-specific warning events are not available for the live project dataset.", "source": None, "items": []}
+    if window not in RANGE_WINDOWS:
+        raise HTTPException(422, "Unsupported historical window")
+    try:
+        return historical_warnings(code, window)
+    except KeyError:
+        raise HTTPException(404, "Project not found")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))

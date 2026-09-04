@@ -62,6 +62,12 @@ class ShapFactor(ContractModel):
     direction: str
 
 
+class CapabilityStatus(ContractModel):
+    available: bool
+    reason: str | None = None
+    source: str | None = None
+
+
 class QuantileRange(ContractModel):
     p10: float
     p50: float
@@ -108,6 +114,9 @@ class ForecastResponse(ContractModel):
     cost_factors: list[ShapFactor]
     delay_factors: list[ShapFactor]
     risk_factors: list[ShapFactor]
+    cost_explanation_status: CapabilityStatus
+    delay_explanation_status: CapabilityStatus
+    risk_explanation_status: CapabilityStatus
     best_models: BestModels
     expected_range: ExpectedRange | None
     completion_probabilities: list[CompletionProbability]
@@ -248,6 +257,20 @@ class PeerResponse(ContractModel):
     peer_count: int
     medians: PeerMedians
     peers: list[PeerProject]
+
+
+class HistoricalWarning(ContractModel):
+    date: str
+    type: str
+    severity: RiskLevel
+    message: str
+
+
+class WarningResponse(ContractModel):
+    available: bool
+    reason: str | None = None
+    source: str | None = None
+    items: list[HistoricalWarning]
 
 
 class LifecycleProvenance(ContractModel):
