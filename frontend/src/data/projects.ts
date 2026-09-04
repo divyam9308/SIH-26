@@ -1,3 +1,4 @@
+// DEMO-ONLY reference data retained from frontend-SIH; production UI uses projectService.
 export type RiskCategory = "Critical" | "High" | "Medium" | "Low";
 
 export type Project = {

@@ -1,3 +1,4 @@
+// DEMO-ONLY reference data retained from frontend-SIH; production UI uses predictionAccuracyService.
 export type RiskLevel = "Low" | "Moderate" | "High" | "Critical";
 export type EvaluationConfig = {
   rule: string;
