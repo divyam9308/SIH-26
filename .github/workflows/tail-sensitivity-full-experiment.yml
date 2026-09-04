@@ -1,0 +1,78 @@
+name: Full tail sensitivity experiment
+
+on:
+  push:
+    branches:
+      - exp-tail-sensitivity-2001-2021
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout experiment branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Validate Python sources
+        run: python -m compileall -q backend scripts tests
+
+      - name: Run tail sensitivity unit tests
+        run: pytest -q tests/test_tail_sensitivity_2001_2021.py
+
+      - name: Rebuild canonical frozen 2001-2021 evaluation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from backend.app.ml.monthly_lifecycle import build_training_dataset
+          from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
+
+          data, identity = build_training_dataset()
+          root = Path('test-output/tail-sensitivity-baseline')
+          root.mkdir(parents=True, exist_ok=True)
+          result = train_window_with_promoted_cost_and_delay(
+              2001,
+              2021,
+              2025,
+              data=data,
+              identity=identity,
+              artifact_root=root,
+              verify_frozen_reference=True,
+          )
+          print('canonical baseline rebuilt:', result.get('metadata', {}).get('model_version'))
+          PY
+
+      - name: Run leakage-safe tail sensitivity analysis
+        run: |
+          python scripts/run_tail_sensitivity_2001_2021.py \
+            --ledger test-output/tail-sensitivity-baseline/2001_2021/prediction_validation.csv \
+            --output test-output/tail-sensitivity-2001-2021/tail_sensitivity_result.json
+
+      - name: Show tail sensitivity result
+        if: always()
+        run: |
+          if [ -f test-output/tail-sensitivity-2001-2021/tail_sensitivity_result.json ]; then
+            cat test-output/tail-sensitivity-2001-2021/tail_sensitivity_result.json
+          else
+            echo 'tail_sensitivity_result.json was not produced'
+          fi
+
+      - name: Upload tail sensitivity artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tail-sensitivity-2001-2021
+          path: |
+            test-output/tail-sensitivity-2001-2021/tail_sensitivity_result.json
+            test-output/tail-sensitivity-baseline/2001_2021/evaluation_results.json
+            test-output/tail-sensitivity-baseline/2001_2021/prediction_validation.csv
+          if-no-files-found: error
