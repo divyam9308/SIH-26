@@ -1,0 +1,74 @@
+name: Full Delay R2 experiment
+
+on:
+  push:
+    branches: [exp-delay-r2-2001-2021]
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+
+      - name: Checkout integration baseline
+        uses: actions/checkout@v4
+        with:
+          ref: frontend-backend-integration
+          path: baseline-src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Build frozen integration baseline
+        working-directory: baseline-src
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from backend.app.ml.monthly_lifecycle import build_training_dataset
+          from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
+
+          data, identity = build_training_dataset()
+          train_window_with_promoted_cost_and_delay(
+              2001,
+              2021,
+              2025,
+              data=data,
+              identity=identity,
+              artifact_root=Path('../baseline-output'),
+              verify_frozen_reference=True,
+          )
+          PY
+
+      - name: Install rebuilt frozen reference for comparison
+        run: |
+          mkdir -p models/monthly_lifecycle/2001_2021
+          cp baseline-output/2001_2021/evaluation_results.json models/monthly_lifecycle/2001_2021/evaluation_results.json
+
+      - name: Run Delay R2 candidate comparison
+        run: python scripts/run_delay_r2_2001_2021.py
+
+      - name: Show verdict
+        if: always()
+        run: |
+          if [ -f test-output/delay-r2-2001-2021/experiment_result.json ]; then
+            cat test-output/delay-r2-2001-2021/experiment_result.json
+          fi
+
+      - name: Upload Delay R2 experiment result
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr191-delay-r2-experiment-result
+          path: |
+            test-output/delay-r2-2001-2021/experiment_result.json
+            test-output/delay-r2-2001-2021/candidate_result.json
+            baseline-output/2001_2021/evaluation_results.json
+          if-no-files-found: error
