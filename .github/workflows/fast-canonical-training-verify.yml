@@ -38,10 +38,12 @@ jobs:
             scripts/run_fast_production_verify.py
           pytest -q tests/test_lifecycle_live_retraining.py tests/test_production_exp105_exp113.py
 
-      - name: Fresh performance-preserving canonical retrain
+      - name: Fresh optimized retrain with dynamic self-verification
         env:
           PYTHONPATH: '${{ github.workspace }}'
           SIH_DISABLE_TRAIN_CACHE: '1'
+          SIH_FOLD_JOBS: '2'
+          SIH_MODEL_THREADS: '1'
         run: |
           mkdir -p audit_outputs
           python scripts/run_fast_production_verify.py \
@@ -51,6 +53,8 @@ jobs:
             --output audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.json \
             | tee audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log
           grep 'FAST_CANONICAL_TOTAL_SECONDS=' audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log >> "$GITHUB_STEP_SUMMARY"
+          grep 'FAST_COST_MAE=' audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log >> "$GITHUB_STEP_SUMMARY"
+          grep 'FAST_DELAY_MAE=' audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
