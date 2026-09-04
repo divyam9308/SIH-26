@@ -9,6 +9,7 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from catboost import Pool
 
 from backend.app.ml.real_time_windows import (
     FEATURES,

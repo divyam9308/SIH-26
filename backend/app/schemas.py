@@ -68,6 +68,15 @@ class CapabilityStatus(ContractModel):
     source: str | None = None
 
 
+class OperationalDriver(ContractModel):
+    type: str
+    label: str
+    category: Literal["COST", "DELAY", "BOTH", "IMPLEMENTATION"]
+    evidence: str
+    provenance: Literal["direct", "derived"]
+    source: str
+
+
 class QuantileRange(ContractModel):
     p10: float
     p50: float
@@ -117,6 +126,7 @@ class ForecastResponse(ContractModel):
     cost_explanation_status: CapabilityStatus
     delay_explanation_status: CapabilityStatus
     risk_explanation_status: CapabilityStatus
+    operational_drivers: list[OperationalDriver]
     best_models: BestModels
     expected_range: ExpectedRange | None
     completion_probabilities: list[CompletionProbability]

@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 
 from backend.app.ml.real_time_windows import FEATURES, RISK_LEVELS, _predict_regressor, active_version, apply_historical_priors, apply_sector_correction, features, model_dir, predict_quantiles, scale_quantile_range
-from backend.app.services.data_service import get_project
+from backend.app.services.data_service import get_project, history_df
+from backend.app.services.operational_driver_service import operational_drivers
 from backend.app.services.simulation_service import _shap_factors_for_model
 
 
@@ -135,6 +136,9 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     factors = _shap_factors_for_model(cost_model, X.iloc[0]) if include_explanations else []
     delay_factors = _shap_factors_for_model(delay_model, X.iloc[0]) if include_explanations else []
     risk_factors = _shap_factors_for_model(risk_model, X.iloc[0]) if include_explanations else []
+    history = history_df()
+    history = history[history["project_code"].astype(str).eq(str(project.project_code))]
+    drivers = operational_drivers(project, history, source="official_project_record")
     def explanation_status(values: list[dict]) -> dict:
         available = bool(values) and any(value.get("direction") != "not available" for value in values)
         return {
@@ -171,6 +175,7 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
         "confidence_calibration_status": calibration.get("status", "unavailable") if uncertainty else "unavailable",
         "explanation": factors, "shap_explanation": factors, "cost_factors": factors, "delay_factors": delay_factors, "risk_factors": risk_factors,
         "cost_explanation_status": explanation_status(factors), "delay_explanation_status": explanation_status(delay_factors), "risk_explanation_status": explanation_status(risk_factors),
+        "operational_drivers": drivers,
         "best_models": {"cost": metadata.get("algorithms", {}).get("cost", "registered model"), "delay": metadata.get("algorithms", {}).get("delay", "registered model")},
         "expected_range": expected_range,
         "completion_probabilities": _completion_probabilities(target, X, planned),
