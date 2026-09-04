@@ -20,7 +20,11 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights, build_training_dataset
 from backend.app.ml.production_exp105_exp113_fast import train_window_with_promoted_cost_and_delay
 
-ATOL = 1e-6
+# Production lifecycle metrics are persisted/reported at three decimal places.
+# Recomputed validation MAE uses full-precision persisted predictions, so compare at
+# the same public metric precision rather than requiring impossible 1e-6 equality
+# against an already-rounded in-memory metric.
+METRIC_DECIMALS = 3
 
 
 def _weighted_mae(frame: pd.DataFrame, prediction_col: str, actual_col: str) -> float:
@@ -32,9 +36,14 @@ def _weighted_mae(frame: pd.DataFrame, prediction_col: str, actual_col: str) -> 
     return float(np.average(error, weights=weights))
 
 
-def _assert_close(label: str, left: float, right: float) -> None:
-    if not np.isclose(float(left), float(right), rtol=0.0, atol=ATOL):
-        raise RuntimeError(f"{label} diverged: in_memory={left} persisted={right}")
+def _assert_same_reported_metric(label: str, in_memory: float, persisted: float) -> None:
+    left = round(float(in_memory), METRIC_DECIMALS)
+    right = round(float(persisted), METRIC_DECIMALS)
+    if left != right:
+        raise RuntimeError(
+            f"{label} diverged at production metric precision: "
+            f"in_memory={in_memory} persisted={persisted}"
+        )
 
 
 def main() -> None:
@@ -77,8 +86,8 @@ def main() -> None:
     metrics = result["lifecycle"]["metrics"]
     cost_mae = float(metrics["cost"]["MAE"])
     delay_mae = float(metrics["delay"]["MAE"])
-    _assert_close("Cost MAE", cost_mae, persisted_cost_mae)
-    _assert_close("Delay MAE", delay_mae, persisted_delay_mae)
+    _assert_same_reported_metric("Cost MAE", cost_mae, persisted_cost_mae)
+    _assert_same_reported_metric("Delay MAE", delay_mae, persisted_delay_mae)
 
     promotion = result.get("promotion") or {}
     if promotion.get("risk_retained") is not True:
@@ -98,6 +107,7 @@ def main() -> None:
         "delay_mae": delay_mae,
         "persisted_cost_mae": persisted_cost_mae,
         "persisted_delay_mae": persisted_delay_mae,
+        "metric_precision_decimals": METRIC_DECIMALS,
         "elapsed_seconds": elapsed_seconds,
         "performance": performance,
         "production_cost_baseline": metadata.get("production_cost_baseline"),
