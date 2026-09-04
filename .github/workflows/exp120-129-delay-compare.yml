@@ -6,6 +6,7 @@ on:
       - 'backend/app/ml/experiments/exp12*_delay.py'
       - 'backend/app/ml/experiments/post_exp113_delay_common.py'
       - 'backend/app/ml/experiments/run_exp120_129.py'
+      - '.github/workflows/exp120-129-delay-compare.yml'
   workflow_dispatch:
 
 jobs:
@@ -15,8 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      POST_EXP113_OOF_WORKERS: '2'
-      POST_EXP113_THREADS_PER_WORKER: '2'
+      # Six strict-forward production folds are independent. Use all four
+      # GitHub-hosted runner cores across processes and keep each production
+      # fit single-threaded to avoid nested oversubscription. This changes only
+      # orchestration/runtime; the folds, models, targets and evaluation
+      # contract remain identical.
+      POST_EXP113_OOF_WORKERS: '4'
+      POST_EXP113_THREADS_PER_WORKER: '1'
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
