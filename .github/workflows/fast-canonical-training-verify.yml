@@ -1,0 +1,62 @@
+name: Fast canonical Exp105 + Exp113 training verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/production_exp105_exp113_fast.py'
+      - 'backend/app/services/lifecycle_retraining_fast.py'
+      - 'backend/app/routes/models.py'
+      - 'scripts/run_fast_production_verify.py'
+      - '.github/workflows/fast-canonical-training-verify.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-fast-training:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2019, 2021]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Syntax and routing regression tests
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: |
+          python -m py_compile \
+            backend/app/ml/production_exp105_exp113_fast.py \
+            backend/app/services/lifecycle_retraining_fast.py \
+            backend/app/routes/models.py \
+            scripts/run_fast_production_verify.py
+          pytest -q tests/test_lifecycle_live_retraining.py tests/test_production_exp105_exp113.py
+
+      - name: Fresh performance-preserving canonical retrain
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+          SIH_DISABLE_TRAIN_CACHE: '1'
+        run: |
+          mkdir -p audit_outputs
+          python scripts/run_fast_production_verify.py \
+            --start 2001 \
+            --end ${{ matrix.end }} \
+            --test-end 2025 \
+            --output audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.json \
+            | tee audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log
+          grep 'FAST_CANONICAL_TOTAL_SECONDS=' audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fast-exp105-exp113-2001-${{ matrix.end }}
+          path: |
+            audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.json
+            audit_outputs/fast_exp105_exp113_2001_${{ matrix.end }}.log
+          if-no-files-found: error
