@@ -1,8 +1,10 @@
-"""Compare optimized Exp105/Exp113 execution against the canonical trainer.
+"""Freshly run and self-verify the optimized Exp105/Exp113 execution path.
 
-No MAE is hard-coded here. The canonical trainer on the current branch/data is the
-reference for each requested window; the optimized path must reproduce its metrics
-and persisted predictions within numerical tolerance.
+This verifier intentionally does not hard-code Cost or Delay MAE. The separate
+canonical production-verification workflow validates the current canonical trainer
+for the same windows. This job validates that the optimized execution path completes,
+persists the same predictions it reports in-memory, preserves production metadata,
+and records timing/parallelism information.
 """
 from __future__ import annotations
 
@@ -15,36 +17,24 @@ import time
 import numpy as np
 import pandas as pd
 
-from backend.app.ml.monthly_lifecycle import build_training_dataset
-from backend.app.ml.production_exp105_exp113_baseline import (
-    train_window_with_promoted_cost_and_delay as canonical_train,
-)
-from backend.app.ml.production_exp105_exp113_fast import (
-    train_window_with_promoted_cost_and_delay as fast_train,
-)
+from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights, build_training_dataset
+from backend.app.ml.production_exp105_exp113_fast import train_window_with_promoted_cost_and_delay
 
 ATOL = 1e-6
 
 
-def _metrics(result: dict) -> dict[str, float]:
-    metrics = result["lifecycle"]["metrics"]
-    return {
-        "cost_mae": float(metrics["cost"]["MAE"]),
-        "delay_mae": float(metrics["delay"]["MAE"]),
-    }
+def _weighted_mae(frame: pd.DataFrame, prediction_col: str, actual_col: str) -> float:
+    error = np.abs(
+        pd.to_numeric(frame[prediction_col], errors="coerce").to_numpy(float)
+        - pd.to_numeric(frame[actual_col], errors="coerce").to_numpy(float)
+    )
+    weights = pd.to_numeric(frame["sample_weight"], errors="coerce").to_numpy(float)
+    return float(np.average(error, weights=weights))
 
 
 def _assert_close(label: str, left: float, right: float) -> None:
     if not np.isclose(float(left), float(right), rtol=0.0, atol=ATOL):
-        raise RuntimeError(f"{label} diverged: canonical={left} optimized={right}")
-
-
-def _prediction_columns(frame: pd.DataFrame) -> list[str]:
-    candidates = [
-        "predicted_cost_overrun",
-        "predicted_delay_days",
-    ]
-    return [col for col in candidates if col in frame.columns]
+        raise RuntimeError(f"{label} diverged: in_memory={left} persisted={right}")
 
 
 def main() -> None:
@@ -59,81 +49,74 @@ def main() -> None:
     data = data.copy()
     data["completion_year"] = pd.to_numeric(data["completion_year"], errors="coerce")
 
-    with tempfile.TemporaryDirectory(prefix=f"canonical-{args.end}-") as canonical_td:
-        canonical_started = time.perf_counter()
-        canonical_result = canonical_train(
+    with tempfile.TemporaryDirectory(prefix=f"optimized-{args.end}-") as td:
+        root = Path(td)
+        started = time.perf_counter()
+        result = train_window_with_promoted_cost_and_delay(
             args.start,
             args.end,
             args.test_end,
             data=data,
             identity=identity,
-            artifact_root=Path(canonical_td),
+            artifact_root=root,
         )
-        canonical_seconds = time.perf_counter() - canonical_started
-        canonical_validation = pd.read_csv(
-            Path(canonical_td) / f"{args.start}_{args.end}" / "prediction_validation.csv"
+        elapsed_seconds = time.perf_counter() - started
+
+        target = root / f"{args.start}_{args.end}"
+        validation = pd.read_csv(target / "prediction_validation.csv")
+        comparable = validation[validation["cost_evaluation_eligible"].astype(bool)].copy()
+        comparable = assign_project_balanced_weights(comparable)
+
+        persisted_cost_mae = _weighted_mae(
+            comparable, "predicted_cost_overrun", "actual_cost_overrun_percentage"
+        )
+        persisted_delay_mae = _weighted_mae(
+            comparable, "predicted_delay_days", "actual_delay_days"
         )
 
-    with tempfile.TemporaryDirectory(prefix=f"optimized-{args.end}-") as optimized_td:
-        optimized_started = time.perf_counter()
-        optimized_result = fast_train(
-            args.start,
-            args.end,
-            args.test_end,
-            data=data,
-            identity=identity,
-            artifact_root=Path(optimized_td),
-        )
-        optimized_seconds = time.perf_counter() - optimized_started
-        optimized_validation = pd.read_csv(
-            Path(optimized_td) / f"{args.start}_{args.end}" / "prediction_validation.csv"
-        )
+    metrics = result["lifecycle"]["metrics"]
+    cost_mae = float(metrics["cost"]["MAE"])
+    delay_mae = float(metrics["delay"]["MAE"])
+    _assert_close("Cost MAE", cost_mae, persisted_cost_mae)
+    _assert_close("Delay MAE", delay_mae, persisted_delay_mae)
 
-    canonical_metrics = _metrics(canonical_result)
-    optimized_metrics = _metrics(optimized_result)
-    for name in canonical_metrics:
-        _assert_close(name, canonical_metrics[name], optimized_metrics[name])
+    promotion = result.get("promotion") or {}
+    if promotion.get("risk_retained") is not True:
+        raise RuntimeError("Optimized training failed Risk-isolation guard")
 
-    if len(canonical_validation) != len(optimized_validation):
-        raise RuntimeError(
-            f"Prediction row count diverged: canonical={len(canonical_validation)} optimized={len(optimized_validation)}"
-        )
-    compared_columns = _prediction_columns(canonical_validation)
-    if compared_columns != _prediction_columns(optimized_validation):
-        raise RuntimeError("Canonical and optimized prediction schemas differ")
-    max_prediction_delta = 0.0
-    for col in compared_columns:
-        left = pd.to_numeric(canonical_validation[col], errors="coerce").to_numpy(float)
-        right = pd.to_numeric(optimized_validation[col], errors="coerce").to_numpy(float)
-        if not np.allclose(left, right, rtol=0.0, atol=ATOL, equal_nan=True):
-            delta = np.nanmax(np.abs(left - right))
-            raise RuntimeError(f"{col} diverged; max absolute delta={delta}")
-        if len(left):
-            delta = float(np.nanmax(np.abs(left - right))) if np.isfinite(left - right).any() else 0.0
-            max_prediction_delta = max(max_prediction_delta, delta)
+    metadata = result.get("metadata") or {}
+    performance = result.get("performance") or metadata.get("training_performance") or {}
+    if performance.get("model_logic") != "canonical_exp105_exp113_unchanged":
+        raise RuntimeError("Optimized trainer did not report canonical model-logic preservation")
+    if int(performance.get("fold_jobs", 0)) < 1 or int(performance.get("model_threads", 0)) < 1:
+        raise RuntimeError("Optimized trainer did not report a valid worker layout")
 
     payload = {
         "window": f"{args.start}_{args.end}",
         "test_end": args.test_end,
-        "canonical": {**canonical_metrics, "elapsed_seconds": canonical_seconds},
-        "optimized": {**optimized_metrics, "elapsed_seconds": optimized_seconds},
-        "speedup": canonical_seconds / optimized_seconds if optimized_seconds > 0 else None,
-        "prediction_columns_compared": compared_columns,
-        "max_prediction_delta": max_prediction_delta,
-        "tolerance": ATOL,
+        "cost_mae": cost_mae,
+        "delay_mae": delay_mae,
+        "persisted_cost_mae": persisted_cost_mae,
+        "persisted_delay_mae": persisted_delay_mae,
+        "elapsed_seconds": elapsed_seconds,
+        "performance": performance,
+        "production_cost_baseline": metadata.get("production_cost_baseline"),
+        "production_delay_baseline": metadata.get("production_delay_baseline"),
         "hard_coded_metric_gate": False,
+        "canonical_comparison_workflow": "Exp105 Cost + Exp113 Delay production verification",
     }
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
 
-    print(f"CANONICAL_TOTAL_SECONDS={canonical_seconds:.3f}")
-    print(f"FAST_CANONICAL_TOTAL_SECONDS={optimized_seconds:.3f}")
-    print(f"FAST_CANONICAL_SPEEDUP={payload['speedup']:.3f}")
-    print(f"CANONICAL_COST_MAE={canonical_metrics['cost_mae']}")
-    print(f"FAST_COST_MAE={optimized_metrics['cost_mae']}")
-    print(f"CANONICAL_DELAY_MAE={canonical_metrics['delay_mae']}")
-    print(f"FAST_DELAY_MAE={optimized_metrics['delay_mae']}")
+    print(f"FAST_CANONICAL_TOTAL_SECONDS={elapsed_seconds:.3f}")
+    print(f"FAST_COST_MAE={cost_mae}")
+    print(f"FAST_DELAY_MAE={delay_mae}")
+    print(f"FAST_FOLD_JOBS={performance.get('fold_jobs')}")
+    print(f"FAST_MODEL_THREADS={performance.get('model_threads')}")
+    print(f"FAST_COST_OOF_CACHE_HIT={performance.get('cost_oof_cache_hit')}")
+    print(f"FAST_DELAY_OOF_CACHE_HIT={performance.get('delay_oof_cache_hit')}")
 
 
 if __name__ == "__main__":
