@@ -57,6 +57,8 @@ def _lifecycle_report(raw: dict, model_path: Path) -> dict:
     metadata.update({
         "training_start": training[0] if len(training) > 0 else None,
         "training_end": training[1] if len(training) > 1 else None,
+        "test_start": testing[0] if len(testing) > 0 else None,
+        "test_end": testing[1] if len(testing) > 1 else None,
         "evaluated_test_start": testing[0] if len(testing) > 0 else None,
         "evaluated_test_end": testing[1] if len(testing) > 1 else None,
         "training_projects": metadata.get("unique_training_projects"),

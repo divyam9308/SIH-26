@@ -20,12 +20,13 @@ export interface PredictionAccuracyData {
   importance: { model_version: string; cost_model: ModelImportance[]; delay_model: ModelImportance[]; risk_model: ModelImportance[] };
 }
 
-export async function getPredictionAccuracyData(signal?: AbortSignal): Promise<PredictionAccuracyData> {
+export async function getPredictionAccuracyData(window: string, signal?: AbortSignal): Promise<PredictionAccuracyData> {
+  const query = `?model_version=${encodeURIComponent(window)}`;
   const [report, evidence, rolling, importance] = await Promise.all([
-    apiGet<ValidationReport>('/api/models/validation', signal),
-    apiGet<{ model_version: string; items: ValidationRow[]; total: number }>('/api/models/prediction-validation?limit=500', signal),
-    apiGet<PredictionAccuracyData['rolling']>('/api/models/rolling-validation', signal),
-    apiGet<PredictionAccuracyData['importance']>('/api/models/importance', signal),
+    apiGet<ValidationReport>(`/api/models/validation${query}`, signal),
+    apiGet<{ model_version: string; items: ValidationRow[]; total: number }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}`, signal),
+    apiGet<PredictionAccuracyData['rolling']>(`/api/models/rolling-validation${query}`, signal),
+    apiGet<PredictionAccuracyData['importance']>(`/api/models/importance${query}`, signal),
   ]);
   return { report, rows: evidence.items, total: evidence.total, rolling, importance };
 }

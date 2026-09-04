@@ -23,8 +23,12 @@ def metrics():
 
 
 @router.get("/importance")
-def importance():
-    return global_importances()
+def importance(model_version: str | None = None, model: str | None = None):
+    selected = model_version or model
+    try:
+        return global_importances(selected)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.get("/lifecycle-runs")

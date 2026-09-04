@@ -132,3 +132,17 @@ def test_historical_project_detail_honours_selected_window():
     assert forecast.status_code == 200
     assert detail.json()["project_code"] == code
     assert forecast.json()["model_version"] == item["model_version"]
+
+
+def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
+    report = client.get("/api/models/validation", params={"model_version": "2001_2021"})
+    rows = client.get("/api/models/prediction-validation", params={"model_version": "2001_2021", "limit": 1})
+    importance = client.get("/api/models/importance", params={"model_version": "2001_2021"})
+    assert report.status_code == rows.status_code == importance.status_code == 200
+    assert report.json()["model_version"] == "monthly-2001-2021"
+    assert report.json()["metadata"]["training_start"] == 2001
+    assert report.json()["metadata"]["training_end"] == 2021
+    assert report.json()["metadata"]["test_start"] == 2022
+    assert report.json()["metadata"]["test_end"] == 2025
+    assert rows.json()["model_version"] == "2001_2021"
+    assert importance.json()["model_version"] == "monthly-2001-2021"

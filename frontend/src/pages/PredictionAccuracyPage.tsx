@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { AlertTriangle, BarChart3, CalendarDays, CheckCircle2, Clock3, Info, RefreshCw, TrendingUp } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { getPredictionAccuracyData, type PredictionAccuracyData, type ValidationRow } from '../services/predictionAccuracyService';
+import { SAVED_WINDOW_STORAGE_KEY, SAVED_WINDOWS } from '../components/dashboard/FilterBar';
 import '../styles/predictionAccuracy.css';
 
 const blue = '#2563eb';
@@ -27,12 +28,24 @@ function ScatterPanel({ title, rows, kind }: { title: string; rows: ValidationRo
 }
 
 export function PredictionAccuracyPage() {
+  const [selectedWindow, setSelectedWindow] = useState(() => {
+    const stored = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY);
+    return stored && SAVED_WINDOWS.some((item) => item.key === stored) ? stored : '2001_2017';
+  });
   const [data, setData] = useState<PredictionAccuracyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
-  useEffect(() => { const controller = new AbortController(); setLoading(true); setError(null); getPredictionAccuracyData(controller.signal).then(setData).catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === 'AbortError') return; setError(reason instanceof Error ? reason.message : 'Validation data unavailable.'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [refreshKey]);
+  useEffect(() => {
+    const updateSelectedWindow = () => {
+      const stored = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY);
+      if (stored && SAVED_WINDOWS.some((item) => item.key === stored)) setSelectedWindow(stored);
+    };
+    globalThis.addEventListener('storage', updateSelectedWindow);
+    return () => globalThis.removeEventListener('storage', updateSelectedWindow);
+  }, []);
+  useEffect(() => { const controller = new AbortController(); setLoading(true); setError(null); getPredictionAccuracyData(selectedWindow, controller.signal).then(setData).catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === 'AbortError') return; setError(reason instanceof Error ? reason.message : 'Validation data unavailable.'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [refreshKey, selectedWindow]);
   const matrix = useMemo(() => { const result = Array.from({ length: 4 }, () => [0, 0, 0, 0]); for (const row of data?.rows ?? []) { const actual = typeof row.actual_risk === 'number' ? row.actual_risk : ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].indexOf(row.actual_risk.toUpperCase()); const predicted = typeof row.predicted_risk === 'number' ? row.predicted_risk : ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].indexOf(row.predicted_risk.toUpperCase()); if (actual >= 0 && actual < 4 && predicted >= 0 && predicted < 4) result[actual][predicted] += 1; } return result; }, [data]);
   if (!data && loading) return <div className="prediction-accuracy-page"><main className="pa-content"><Panel title="Prediction Accuracy">Loading real model validation artifacts…</Panel></main></div>;
   if (!data) return <div className="prediction-accuracy-page"><main className="pa-content"><Panel title="Prediction Accuracy"><p>{error ?? 'Validation data unavailable.'}</p><button className="pa-refresh" onClick={refresh}>Try again</button></Panel></main></div>;
@@ -41,7 +54,7 @@ export function PredictionAccuracyPage() {
   return <div className="prediction-accuracy-page">
     <div className="pa-product-header"><div><BarChart3 size={17} /><b>PAIMANA</b><span>MoSPI · Project Risk Intelligence</span></div><div><span className="pa-live"><i />Live · model {report.model_version}</span><em>SIH 26103</em></div></div>
     <main className="pa-content">
-      <div className="pa-page-heading"><div><h1>Prediction Accuracy</h1><p>Real future-holdout evaluation from the active production model artifacts.</p></div><div className="pa-heading-actions"><span className="pa-validated"><CheckCircle2 size={14} />Validated on {data.total} completed projects</span><span>Holdout: {report.metadata.test_start}–{report.metadata.test_end}</span><button className="pa-refresh" onClick={refresh} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} />{loading ? 'Refreshing' : 'Refresh'}</button></div></div>
+      <div className="pa-page-heading"><div><h1>Prediction Accuracy</h1><p>Real future-holdout evaluation for saved training range {selectedWindow.replace('_', '–')}.</p></div><div className="pa-heading-actions"><span className="pa-validated"><CheckCircle2 size={14} />Validated on {data.total} completed projects</span><span>Holdout: {report.metadata.test_start}–{report.metadata.test_end}</span><button className="pa-refresh" onClick={refresh} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} />{loading ? 'Refreshing' : 'Refresh'}</button></div></div>
       {error && <p className="pa-note"><AlertTriangle size={13} />{error}</p>}
       <section className="pa-config"><div className="pa-status"><span>Model version</span><b>{report.model_version}</b></div><div className="pa-status"><span>Training period</span><b>{report.metadata.training_start}–{report.metadata.training_end}</b></div><div className="pa-status"><span>Holdout period</span><b>{report.metadata.test_start}–{report.metadata.test_end}</b></div><div className="pa-status"><span>Evaluation</span><b>{report.metadata.validation_method ?? 'Temporal holdout'}</b></div></section>
       <section className="pa-section"><h2>Validation Summary</h2><div className="pa-summary-grid">
