@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from scripts.run_tail_sensitivity_2001_2021 import build_report, derive_training_thresholds
 
@@ -46,8 +47,8 @@ def _ledger():
 
 def test_thresholds_are_derived_from_training_projects_only():
     thresholds = derive_training_thresholds(_training_frame())
-    assert thresholds["cost"]["p90"] == 90.1
-    assert thresholds["delay"]["p95"] == 950.5
+    assert thresholds["cost"]["p90"] == pytest.approx(90.1)
+    assert thresholds["delay"]["p95"] == pytest.approx(950.5)
     assert thresholds["cost"]["source"].startswith("2001-2021")
 
 
