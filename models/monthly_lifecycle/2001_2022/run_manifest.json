@@ -1,0 +1,65 @@
+{
+  "status": "complete",
+  "model_role": "production",
+  "model_family": "monthly_lifecycle",
+  "model_version": "monthly-2001-2022",
+  "run_id": "bb8b71e797c04aca81957d868f6b1e09",
+  "dataset_fingerprint": "daef4225ed7d7a590854c14c492a0abc8e4ac0899b7751bdf9a373ce6ffab87b",
+  "training_fingerprint": "3a66f10a42618df9c5e995d69eb798d1c80bbdbd90fe0ab7b13f79cb1213e8fe",
+  "test_fingerprint": "ba6e334df32ae8965d3f4b2a857e4a4fac607a332b72459343fb573cdbc9aec7",
+  "feature_schema_fingerprint": "aeb75319007d3fbfe1337b72b241d22262df53e115547c8c3324cffd450508e3",
+  "source_commit": "3c303a33d33906d9a6daac09db77280f03489f82",
+  "source_dataset_files": {
+    "monthly_snapshots": "7f59cdec7ff0b85c325dc14bdcf3f39d86e1147f30a041e7af1f57f25e610a4b",
+    "completed_outcomes": "07e434e731dbde78f5002b12c4042a0ed18093b23b65de3130c413a2022de264"
+  },
+  "window": "2001_2022",
+  "training_period": [
+    2001,
+    2022
+  ],
+  "testing_period": [
+    2023,
+    2025
+  ],
+  "feature_count": 48,
+  "feature_count_by_target": {
+    "cost": 48,
+    "delay": 45,
+    "risk": 25
+  },
+  "production_cost_baseline": "exp61_plus_exp105_dynamic_factor_cost_v1",
+  "production_delay_baseline": "exp61_u1_plus_exp113_quantile_aft_delay_v1",
+  "promoted_from_experiment": "exp_61",
+  "promoted_delay_from_experiment": "exp_113",
+  "metrics": {
+    "cost_mae": 24.266,
+    "delay_mae": 294.287,
+    "risk_macro_f1": 0.407
+  },
+  "artifacts": {
+    "cost_model.pkl": true,
+    "delay_model.pkl": true,
+    "risk_model.pkl": true,
+    "metadata.json": true,
+    "evaluation_results.json": true,
+    "feature_quality_report.json": true,
+    "shap_importance.json": true,
+    "prediction_validation.csv": true,
+    "canonical_evaluation_report.json": true,
+    "canonical_evaluation_report.md": true
+  },
+  "artifact_fingerprints": {
+    "cost_model.pkl": "025f21990f1d36d1a85865faf3b87d5c47a552d5a79e5dd71f9ef72980fae89d",
+    "delay_model.pkl": "fff09c79f5036d0a3bae271dc351875bf5f92f0860e4015b695212e8ad803713",
+    "risk_model.pkl": "a9419b205922483bef33249d0c2828bb81d61c5039a8c52ea84a363306eadbbb",
+    "metadata.json": "08986e3e31f165aec89482aa9619963b8176c36fb88fd3d01ea67277e7c60e14",
+    "evaluation_results.json": "0f04aec4c113c7dd439a663c03eddad6fbeb399fc7a753a7b59a2481022af4de",
+    "feature_quality_report.json": "c6ef93ea3fb4fbc56247f9788bc3d4d88aca3f57769343aba592c16a6af309ce",
+    "shap_importance.json": "4ba74da47bd32b732c6b8fffeb0a64b12be29d2a1d0db743cfafe2426f881889",
+    "prediction_validation.csv": "58ebe977f9381ab79b35e2be661f8c5ad4f9e2fce702fecbb470349c289cc29a",
+    "canonical_evaluation_report.json": "7047757b07680b76d0f86e889d1f8feb21c40c14df2c6c83b4bac4979f056ac6",
+    "canonical_evaluation_report.md": "ae9c524462266e361ed2a7d3637ce6b534b9bd842f3bf2f837109e5f714038ff"
+  },
+  "created_at": "2026-09-04T16:44:26.118985+00:00"
+}

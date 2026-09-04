@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from functools import lru_cache
 
 import joblib
@@ -9,13 +10,28 @@ import numpy as np
 import pandas as pd
 
 from backend.app.ml.real_time_windows import FEATURES, RISK_LEVELS, _predict_regressor, active_version, apply_historical_priors, apply_sector_correction, features, model_dir, predict_quantiles, scale_quantile_range
-from backend.app.services.data_service import get_project
+from backend.app.services.data_service import get_project, history_df
+from backend.app.services.operational_driver_service import operational_drivers
 from backend.app.services.simulation_service import _shap_factors_for_model
 
 
+def active_model_signature(version: str) -> str:
+    """Key model caches by immutable version plus on-disk artifact identity."""
+    target = model_dir(version)
+    names = ("metadata.json", "cost_model.pkl", "delay_model.pkl", "risk_model.pkl", "uncertainty_models.pkl", "confidence_calibration.json")
+    parts = []
+    for name in names:
+        path = target / name
+        if path.exists():
+            stat = path.stat()
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(parts)
+
+
 @lru_cache(maxsize=4)
-def _active_model_bundle(version: str) -> dict:
+def _active_model_bundle(version: str, model_signature: str) -> dict:
     """Load one immutable versioned model bundle for reuse across forecasts."""
+    del model_signature
     target = model_dir(version)
     calibration_path = target / "confidence_calibration.json"
     corrections_path = target / "sector_corrections.json"
@@ -82,7 +98,7 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     version = active_version()
     if not version:
         raise ValueError("No real PAIMANA time-window model is available. Retrain a model first.")
-    bundle = _active_model_bundle(version)
+    bundle = _active_model_bundle(version, active_model_signature(version))
     target = bundle["target"]
     metadata = bundle["metadata"]
     X = _model_inputs(project)
@@ -120,6 +136,16 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     factors = _shap_factors_for_model(cost_model, X.iloc[0]) if include_explanations else []
     delay_factors = _shap_factors_for_model(delay_model, X.iloc[0]) if include_explanations else []
     risk_factors = _shap_factors_for_model(risk_model, X.iloc[0]) if include_explanations else []
+    history = history_df()
+    history = history[history["project_code"].astype(str).eq(str(project.project_code))]
+    drivers = operational_drivers(project, history, source="official_project_record")
+    def explanation_status(values: list[dict]) -> dict:
+        available = bool(values) and any(value.get("direction") != "not available" for value in values)
+        return {
+            "available": available,
+            "reason": None if available else "Project-level SHAP could not be computed for this model response.",
+            "source": "live_model_local_shap" if available else None,
+        }
     current_status = {
         "snapshot_month": pd.to_datetime(project.snapshot_date).strftime("%Y-%m-%d"),
         "physical_progress_percentage": None if pd.isna(progress) else round(float(progress), 1),
@@ -128,16 +154,28 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
         "planned_completion_date": planned.strftime("%Y-%m-%d"),
         "progress_delay_percentage_points": None,
     }
+    approved = float(project.original_cost_cr)
+    predicted_cost_overrun_amount = approved * cost / 100.0
+    predicted_final_cost = approved + predicted_cost_overrun_amount
+    predicted_completion = planned + pd.to_timedelta(delay, unit="D")
     return {
         "project_id": str(project.project_code), "project_name": project.project_name,
+        "model_version": version,
+        "dataset_snapshot_date": pd.to_datetime(project.snapshot_date).strftime("%Y-%m-%d"),
+        "inference_timestamp": datetime.now(timezone.utc).isoformat(),
         "current_status": current_status, "predicted_cost_overrun_percentage": round(cost, 2),
+        "predicted_cost_overrun_amount_cr": round(predicted_cost_overrun_amount, 2),
+        "predicted_final_cost_cr": round(predicted_final_cost, 2),
         "predicted_delay_days": round(delay, 1), "predicted_cost_overrun": round(cost, 2),
+        "predicted_completion_date": predicted_completion.strftime("%Y-%m-%d"),
         "current_progress": current_status["physical_progress_percentage"],
         "predicted_delay_months": round(delay / 30.4375, 1),
         "risk_score": round(probability * 100, 1), "risk_probability_percentage": round(probability * 100, 1), "risk_level": RISK_LEVELS[risk_prediction],
         "model_confidence_percentage": round(float(calibration.get("confidence_percentage", 0.0)), 1) if uncertainty else None,
         "confidence_calibration_status": calibration.get("status", "unavailable") if uncertainty else "unavailable",
         "explanation": factors, "shap_explanation": factors, "cost_factors": factors, "delay_factors": delay_factors, "risk_factors": risk_factors,
+        "cost_explanation_status": explanation_status(factors), "delay_explanation_status": explanation_status(delay_factors), "risk_explanation_status": explanation_status(risk_factors),
+        "operational_drivers": drivers,
         "best_models": {"cost": metadata.get("algorithms", {}).get("cost", "registered model"), "delay": metadata.get("algorithms", {}).get("delay", "registered model")},
         "expected_range": expected_range,
         "completion_probabilities": _completion_probabilities(target, X, planned),
@@ -148,3 +186,8 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
 
 def project_prediction(code: str, override: dict | None = None, include_explanations: bool = True) -> dict:
     return project_forecast(code, include_explanations=include_explanations)
+
+
+def clear_prediction_caches() -> None:
+    """Explicit invalidation hook for model activation/retraining operations."""
+    _active_model_bundle.cache_clear()

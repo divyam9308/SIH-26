@@ -147,6 +147,15 @@ def _prediction_rows(
             "exp12_history_12m",
         ]
     ].copy()
+    # Preserve the production Delay routing decision in the immutable
+    # evaluation ledger.  This is evidence-only routing assigned before model
+    # inference, not a post-hoc classification based on the observed error.
+    if "exp35_calibration_cohort_eligible" in test:
+        rows["delay_routing_path"] = np.where(
+            test["exp35_calibration_cohort_eligible"].fillna(False).to_numpy(dtype=bool),
+            "AFT",
+            "fallback",
+        )
     rows["cost_evaluation_eligible"] = (
         pd.to_numeric(rows["exp12_history_12m"], errors="coerce")
         .fillna(0)

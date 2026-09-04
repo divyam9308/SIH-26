@@ -140,6 +140,32 @@ The organization mirrors the feature/page/service separation used in `fyndbridge
 
 ## Run locally
 
+### Full-stack frontend development
+
+`backend/` remains the authoritative FastAPI and ML implementation. The React
+application in `frontend/` is its only user interface and consumes it over
+`/api`; it does not contain model logic or model results.
+
+Start the API in one terminal:
+
+```bash
+PORT=8000 ./scripts/run_local.sh
+```
+
+Then start the Vite frontend in another:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite proxies `/api` to `http://127.0.0.1:8000`, so no development CORS rule is
+needed. `VITE_API_BASE_URL` may be set in `frontend/.env.local` when deploying
+against a different API origin; see `frontend/.env.example`. For FastAPI to
+serve the production UI itself, run `npm run build` in `frontend/` first; the
+backend serves `frontend/dist` and supports nested SPA routes.
+
 Python 3.11+ is recommended.
 
 ```bash

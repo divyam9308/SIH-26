@@ -93,6 +93,10 @@ def test_year_range_retrain_calls_promoted_production_trainer(tmp_path, monkeypa
         return _comparison_result()
 
     monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fake_train_window)
+    # This unit test verifies staging/call routing with intentionally skeletal
+    # artifacts; report-content validation is covered by the canonical bundle
+    # integration tests and must not require a real retrain here.
+    monkeypatch.setattr(retraining, "_write_evaluation_reports", lambda *_args: {})
     result = retraining.retrain_lifecycle(2001, 2015)
 
     assert called["start"] == 2001
