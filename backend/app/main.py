@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app.core.config import APP_NAME, APP_VERSION, FRONTEND_DIR
 from backend.app.routes import assistant, data_quality, history, models, portfolio, projects, scenario, simulations
+from backend.app.schemas import HealthResponse
 FRONTEND_BUILD_DIR = FRONTEND_DIR / "dist"
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
@@ -28,7 +29,7 @@ async def disable_spa_source_cache(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 def health():
     return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
 

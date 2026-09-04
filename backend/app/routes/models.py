@@ -6,6 +6,8 @@ from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
 from backend.app.services.lifecycle_run_service import lifecycle_runs
 from backend.app.services.monthly_prediction_service import DEFAULT_PRODUCTION_WINDOW, lifecycle_comparison, forecast_evolution
 from backend.app.ml.residual_overrun_experiment import run_residual_overrun_experiment
+from backend.app.services.portfolio_service import invalidate_portfolio_cache
+from backend.app.services.prediction_service import clear_prediction_caches
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -35,7 +37,10 @@ def lifecycle_run_registry():
 def retrain_model(payload: TrainingRange):
     """Retrain the production monthly-lifecycle stack for the selected years."""
     try:
-        return retrain_lifecycle(payload.start_year, payload.end_year)
+        result = retrain_lifecycle(payload.start_year, payload.end_year)
+        clear_prediction_caches()
+        invalidate_portfolio_cache()
+        return result
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise HTTPException(409, str(exc))
 
