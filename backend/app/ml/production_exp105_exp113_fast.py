@@ -22,7 +22,7 @@ from lightgbm import LGBMRegressor
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml import production_exp105_exp113_baseline as canonical
 
-CACHE_VERSION = "exp105-exp113-fast-v1"
+CACHE_VERSION = "exp105-exp113-fast-v2"
 _PATCH_LOCK = threading.Lock()
 
 
@@ -53,8 +53,6 @@ def _cache_root() -> Path:
 
 
 def _frame_key(kind: str, frame: pd.DataFrame) -> str:
-    # joblib.hash is deterministic for pandas objects and includes values, dtypes,
-    # index and column order. CACHE_VERSION explicitly invalidates code-level changes.
     return joblib.hash((CACHE_VERSION, kind, frame), hash_name="sha1")
 
 
@@ -82,8 +80,6 @@ def _store_cached_frame(kind: str, source: pd.DataFrame, value: pd.DataFrame) ->
 
 
 def _threaded_lgbm(*args, **kwargs):
-    # Canonical code currently passes n_jobs=1 explicitly. Override only the
-    # execution resource count; all statistical/model parameters remain unchanged.
     kwargs["n_jobs"] = worker_layout()["model_threads"]
     return LGBMRegressor(*args, **kwargs)
 
@@ -121,7 +117,7 @@ def _parallel_current_cost_oof(train: pd.DataFrame, production_model) -> pd.Data
     family = canonical._family(production_model)
     folds = canonical._forward_folds(train, 6)
     jobs = worker_layout()["fold_jobs"]
-    parts = Parallel(n_jobs=jobs, prefer="threads")(
+    parts = Parallel(n_jobs=jobs, prefer="threads", require="sharedmem")(
         delayed(_cost_fold)(fitting, validation, year, features, family)
         for fitting, validation, year in folds
     )
@@ -158,7 +154,7 @@ def _parallel_base_delay_oof(train: pd.DataFrame, u1_model) -> pd.DataFrame:
     train_delay = canonical._remaining_frame(train)
     folds = canonical._forward_folds(train_delay, 8)
     jobs = worker_layout()["fold_jobs"]
-    parts = Parallel(n_jobs=jobs, prefer="threads")(
+    parts = Parallel(n_jobs=jobs, prefer="threads", require="sharedmem")(
         delayed(_delay_fold)(fitting, validation, year, features, base)
         for fitting, validation, year in folds
     )
@@ -226,7 +222,6 @@ def train_window_with_promoted_cost_and_delay(
     return result
 
 
-# Re-export wrappers/classes used by callers and tests without duplicating model logic.
 Exp105CostProductionModel = canonical.Exp105CostProductionModel
 Exp113DelayProductionModel = canonical.Exp113DelayProductionModel
 PRODUCTION_COST_BASELINE = canonical.PRODUCTION_COST_BASELINE
