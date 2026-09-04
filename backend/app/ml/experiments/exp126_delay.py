@@ -12,12 +12,21 @@ import argparse
 import numpy as np
 import pandas as pd
 
+import backend.app.ml.experiments.post_exp113_delay_common as _common
+from backend.app.ml.production_exp105_exp113_fast import (
+    train_window_with_promoted_cost_and_delay as _fast_train_current_production,
+)
 from backend.app.ml.experiments.post_exp113_delay_common import (
     fit_residual,
     persist,
     prepare_context,
     production_oof,
 )
+
+# Branch-local execution substitution only: the fast wrapper calls the exact
+# canonical Exp105+Exp113 trainer while parallelizing independent internal OOF
+# work. This keeps the experiment/model/evaluation contract unchanged.
+_common.train_current_production = _fast_train_current_production
 
 EXPERIMENT_ID = "exp126"
 NAME = "Reporting Cadence and Data-Quality Behavior (Aditya PR #19 port)"
@@ -129,6 +138,7 @@ def fit_experiment(end: int, output: str):
             "source_experiment": "Exp126 Reporting Cadence and Data-Quality Behavior",
             "adaptation": "delay-only; current post-Exp113 production/OOF harness",
             "causal_as_of_features_only": True,
+            "canonical_training_execution": "performance wrapper only; model logic unchanged",
         }
     )
     return persist(
