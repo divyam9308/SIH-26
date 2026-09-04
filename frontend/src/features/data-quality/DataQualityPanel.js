@@ -1,5 +1,0 @@
-export function dataQualityPanel(data) {
-  const labels={missing_revised_cost:'Missing revised cost',missing_revised_date:'Missing revised date',missing_physical_progress:'Missing physical progress',expenditure_above_revised_cost:'Expenditure > revised cost',revised_date_before_original:'Revised date before original'};
-  return `<div class="dq-grid">${Object.entries(data.flags).map(([k,v])=>`<article class="dq-card"><span>${labels[k]||k}</span><strong>${v}</strong><small>of ${data.rows} rows</small></article>`).join('')}</div>
-  <section class="panel"><div class="panel-head"><div><span class="kicker">Do not silently clean anomalies</span><h2>Flagged project rows</h2></div></div><div class="issue-list">${data.issues.map(i=>`<a href="#/project/${i.project_code}" class="issue-row"><div><strong>${i.project_name}</strong><small>#${i.project_code}</small></div><div>${i.flags.map(f=>`<span class="issue-pill">${f.replaceAll('_',' ')}</span>`).join('')}</div></a>`).join('')}</div></section>`;
-}
