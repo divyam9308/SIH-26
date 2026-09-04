@@ -9,13 +9,19 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 def portfolio_summary(window: str | None = Query(None)):
     if window and window not in RANGE_WINDOWS:
         raise HTTPException(422, "Unsupported historical window")
-    return summary(window)
+    try:
+        return summary(window)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
 
 @router.get("/risk", response_model=PortfolioRiskResponse)
 def portfolio_risk(limit: int = 20, window: str | None = Query(None)):
     if window and window not in RANGE_WINDOWS:
         raise HTTPException(422, "Unsupported historical window")
-    rows = sorted(portfolio_rows(window), key=lambda x: x["priority_score"], reverse=True)
+    try:
+        rows = sorted(portfolio_rows(window), key=lambda x: x["priority_score"], reverse=True)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
     return {"items": rows[: max(1, min(limit, 100))]}
 
 

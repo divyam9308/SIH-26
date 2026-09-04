@@ -1,8 +1,10 @@
 import pandas as pd
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.services import portfolio_service
+from backend.app.services import range_portfolio_service
 
 
 client = TestClient(app)
@@ -91,6 +93,27 @@ def test_saved_historical_windows_expose_precomputed_project_views():
         assert projects.json()["total"] == count
 
 
+def test_saved_historical_views_are_repository_relative_not_cwd(monkeypatch, tmp_path):
+    expected = Path(__file__).resolve().parents[1] / "data" / "processed" / "portfolio_windows"
+    assert range_portfolio_service.SAVED_WINDOW_ROOT == expected
+    monkeypatch.chdir(tmp_path)
+    range_portfolio_service.invalidate_range_cache()
+    response = client.get("/api/projects", params={"window": "2001_2017", "page_size": 1})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1233
+    range_portfolio_service.invalidate_range_cache()
+
+
+def test_missing_historical_artifacts_return_controlled_response(monkeypatch, tmp_path):
+    monkeypatch.setattr(range_portfolio_service, "MODEL_ROOT", tmp_path / "models")
+    monkeypatch.setattr(range_portfolio_service, "SAVED_WINDOW_ROOT", tmp_path / "saved")
+    range_portfolio_service.invalidate_range_cache()
+    response = client.get("/api/projects", params={"window": "2001_2017", "page_size": 1})
+    assert response.status_code == 409
+    assert "Production evaluation" in response.json()["detail"]
+    range_portfolio_service.invalidate_range_cache()
+
+
 def test_historical_project_rows_include_actuals_and_prediction_errors():
     response = client.get("/api/projects", params={"window": "2001_2021", "page_size": 1})
     assert response.status_code == 200
@@ -108,4 +131,4 @@ def test_historical_project_detail_honours_selected_window():
     assert detail.status_code == 200
     assert forecast.status_code == 200
     assert detail.json()["project_code"] == code
-    assert forecast.json()["model_version"] == "2001_2021"
+    assert forecast.json()["model_version"] == item["model_version"]

@@ -29,7 +29,10 @@ def projects(
         raise HTTPException(422, f"Unsupported sort field: {sort}")
     if window and window not in RANGE_WINDOWS:
         raise HTTPException(422, "Unsupported historical window")
-    return project_page(page=page, page_size=limit or page_size, search=search, sector=sector, ministry=ministry, risk_level=risk_level, sort=sort, direction=direction, window=window)
+    try:
+        return project_page(page=page, page_size=limit or page_size, search=search, sector=sector, ministry=ministry, risk_level=risk_level, sort=sort, direction=direction, window=window)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
 
 @router.get("/{code}", response_model=ProjectRecord)
 def project(code: str, window: str | None = None):
@@ -40,6 +43,8 @@ def project(code: str, window: str | None = None):
             return historical_project(code, window)["record"]
         except KeyError:
             raise HTTPException(404, "Project not found")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
     try:
         return row_to_dict(get_project(code))
     except KeyError:
@@ -54,6 +59,8 @@ def prediction(code: str, window: str | None = None):
             return historical_project(code, window)["forecast"]
         except KeyError:
             raise HTTPException(404, "Project not found")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
     try:
         return project_prediction(code)
     except KeyError:
@@ -70,6 +77,8 @@ def forecast(code: str, window: str | None = None):
             return historical_project(code, window)["forecast"]
         except KeyError:
             raise HTTPException(404, "Project not found")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
     try:
         return project_forecast(code)
     except KeyError:

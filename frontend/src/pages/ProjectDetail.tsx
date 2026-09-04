@@ -44,14 +44,16 @@ export function ProjectDetail() {
     setProjectError(null); setForecastStatus(null); setPeerStatus(null); setLifecycleStatus(null);
     Promise.allSettled([
       getProject(projectId, controller.signal, selectedWindow), getProjectForecast(projectId, controller.signal, selectedWindow),
-      getProjectPeers(projectId, controller.signal), getLifecycleForecast(projectId, controller.signal),
-    ]).then(([projectResult, forecastResult, peersResult, lifecycleResult]) => {
+      getProjectPeers(projectId, controller.signal),
+    ]).then(([projectResult, forecastResult, peersResult]) => {
       if (controller.signal.aborted) return;
       if (projectResult.status === 'fulfilled') setProject(projectResult.value); else setProjectError(projectResult.reason instanceof Error ? projectResult.reason.message : 'Project unavailable.');
       if (forecastResult.status === 'fulfilled') setForecast(forecastResult.value); else setForecastStatus(forecastResult.reason instanceof ApiError && forecastResult.reason.status === 409 ? `Prediction unavailable: ${forecastResult.reason.message}` : forecastResult.reason instanceof Error ? forecastResult.reason.message : 'Prediction unavailable.');
       if (peersResult.status === 'fulfilled') setPeers(peersResult.value); else setPeerStatus(peersResult.reason instanceof Error ? peersResult.reason.message : 'Peer benchmark unavailable.');
-      if (lifecycleResult.status === 'fulfilled') setLifecycle(lifecycleResult.value); else setLifecycleStatus(lifecycleResult.reason instanceof ApiError && [404, 409].includes(lifecycleResult.reason.status) ? 'Lifecycle history unavailable for this project.' : lifecycleResult.reason instanceof Error ? lifecycleResult.reason.message : 'Lifecycle history unavailable.');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    getLifecycleForecast(projectId, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setLifecycle(result); })
+      .catch((reason: unknown) => { if (!controller.signal.aborted) setLifecycleStatus(reason instanceof ApiError && [404, 409].includes(reason.status) ? 'Lifecycle history unavailable for this project.' : reason instanceof Error ? reason.message : 'Lifecycle history unavailable.'); });
     return () => controller.abort();
   }, [projectId, selectedWindow]);
 

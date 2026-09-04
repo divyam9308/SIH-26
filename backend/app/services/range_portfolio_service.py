@@ -10,6 +10,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL_ROOT = ROOT / "models" / "monthly_lifecycle"
+SAVED_WINDOW_ROOT = ROOT / "data" / "processed" / "portfolio_windows"
 TRAJECTORIES = ROOT / "data" / "processed" / "paimana_project_trajectories.csv"
 RANGE_WINDOWS = {"2001_2017": (2001, 2017, 2018), "2001_2021": (2001, 2021, 2022), "2001_2022": (2001, 2022, 2023)}
 
@@ -29,6 +30,40 @@ def _paths(window: str):
     return root / "run_manifest.json", root / "prediction_validation.csv"
 
 
+def _saved_window_path(window: str) -> Path:
+    if window not in RANGE_WINDOWS:
+        raise ValueError(f"Unsupported historical window: {window}")
+    return SAVED_WINDOW_ROOT / f"{window}.json"
+
+
+def _saved_payload(window: str) -> dict | None:
+    """Load an existing local frozen project view when its model ledger is absent.
+
+    These files are generated alongside the production artifacts and preserve
+    literal per-project prediction, actual, and error values. They are a
+    fallback for a missing local model bundle, never a substitute for training.
+    """
+    path = _saved_window_path(window)
+    if not path.exists():
+        return None
+    try:
+        saved = json.loads(path.read_text())
+        payload = saved["payload"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"Saved production view for {window} is malformed: {path}") from exc
+    if payload.get("window") != window or not isinstance(payload.get("items"), list):
+        raise ValueError(f"Saved production view for {window} has an invalid payload: {path}")
+    required = {"project_code", "project_name", "predicted_cost_overrun_percentage", "predicted_delay_days", "risk_level"}
+    if payload["items"] and required - set(payload["items"][0]):
+        raise ValueError(f"Saved production view for {window} is missing project prediction fields: {path}")
+    result = dict(payload)
+    result["manifest"] = {
+        "model_version": result["items"][0].get("model_version") if result["items"] else window,
+        "artifact_source": str(path),
+    }
+    return result
+
+
 def _manifest(window: str) -> dict:
     manifest_path, ledger_path = _paths(window)
     if not manifest_path.exists() or not ledger_path.exists():
@@ -43,8 +78,15 @@ def _manifest(window: str) -> dict:
 
 def _signature(window: str) -> str:
     manifest_path, ledger_path = _paths(window)
-    manifest = _manifest(window)
-    return "|".join(("frozen-ledger-v1", manifest["run_id"], manifest["dataset_fingerprint"], str(manifest_path.stat().st_mtime_ns), str(ledger_path.stat().st_mtime_ns), str(ledger_path.stat().st_size)))
+    if manifest_path.exists() and ledger_path.exists():
+        manifest = _manifest(window)
+        return "|".join(("frozen-ledger-v1", manifest["run_id"], manifest["dataset_fingerprint"], str(manifest_path.stat().st_mtime_ns), str(ledger_path.stat().st_mtime_ns), str(ledger_path.stat().st_size)))
+    saved_path = _saved_window_path(window)
+    if saved_path.exists():
+        stat = saved_path.stat()
+        return f"saved-production-view-v1|{saved_path}:{stat.st_mtime_ns}:{stat.st_size}"
+    _manifest(window)
+    raise AssertionError("unreachable")
 
 
 @lru_cache(maxsize=1)
@@ -63,8 +105,14 @@ def _score(level: str) -> float:
 @lru_cache(maxsize=3)
 def _payload(window: str, signature: str) -> dict:
     del signature
+    saved_payload = _saved_payload(window)
+    manifest_path, ledger_path = _paths(window)
+    if not manifest_path.exists() or not ledger_path.exists():
+        if saved_payload is not None:
+            return saved_payload
+        _manifest(window)
+        raise AssertionError("unreachable")
     manifest = _manifest(window)
-    _, ledger_path = _paths(window)
     ledger = pd.read_csv(ledger_path, low_memory=False, dtype={"canonical_project_id": str})
     required = {"canonical_project_id", "project_name", "snapshot_date", "predicted_cost_overrun", "predicted_delay_days", "predicted_risk", "actual_cost_overrun_percentage", "actual_delay_days", "cost_error", "delay_error"}
     if missing := required - set(ledger):
@@ -101,7 +149,8 @@ def historical_project(code: str, window: str) -> dict:
         raise KeyError(code)
     item = max(matches, key=lambda row: row["snapshot_date"])
     record = {"snapshot_date": item["snapshot_date"], "sector": item["sector"], "ministry": item["ministry"], "implementing_agency": item["implementing_agency"], "project_code": item["project_code"], "project_name": item["project_name"], "original_cost_cr": item["original_cost_cr"], "revised_cost_cr": item["revised_cost_cr"], "expenditure_cr": item["expenditure_cr"], "original_end_date": None, "revised_end_date": None, "physical_progress_pct": item["physical_progress_pct"], "source_url": "", "days_to_original_deadline": 0, "schedule_extension_days": item["actual_delay_days"], "cost_escalation_pct": item["actual_cost_overrun_percentage"], "expenditure_to_original_pct": None, "financial_progress_pct": None, "schedule_overrun_90d": None, "cost_overrun_5pct": None, "dq_expenditure_gt_revised": 0, "dq_revised_date_before_original": 0, "dq_missing_revised_cost": int(item["revised_cost_cr"] is None), "dq_missing_revised_date": 1, "dq_missing_progress": int(item["physical_progress_pct"] is None)}
-    forecast = {"project_id": item["project_code"], "project_name": item["project_name"], "model_version": item["model_version"], "dataset_snapshot_date": item["snapshot_date"], "inference_timestamp": item["inference_timestamp"], "current_status": {"snapshot_month": item["snapshot_date"], "physical_progress_percentage": item["physical_progress_pct"], "current_estimated_cost": item["revised_cost_cr"], "expenditure_cr": item["expenditure_cr"], "planned_completion_date": None, "progress_delay_percentage_points": None}, "predicted_cost_overrun_percentage": item["predicted_cost_overrun_percentage"], "predicted_cost_overrun_amount_cr": item["predicted_cost_overrun_amount_cr"], "predicted_final_cost_cr": item["predicted_final_cost_cr"], "predicted_delay_days": item["predicted_delay_days"], "predicted_cost_overrun": item["predicted_cost_overrun_percentage"], "predicted_completion_date": None, "current_progress": item["physical_progress_pct"], "predicted_delay_months": item["predicted_delay_months"], "risk_score": item["risk_score"], "risk_probability_percentage": None, "risk_level": item["risk_level"], "model_confidence_percentage": None, "confidence_calibration_status": item["confidence_calibration_status"], "explanation": [], "shap_explanation": [], "cost_factors": [], "delay_factors": [], "risk_factors": [], "best_models": item["best_models"], "expected_range": None, "completion_probabilities": [], "features_used": [], "model_scope": item["model_scope"]}
+    best_models = item["best_models"]
+    forecast = {"project_id": item["project_code"], "project_name": item["project_name"], "model_version": item["model_version"], "dataset_snapshot_date": item["snapshot_date"], "inference_timestamp": item["inference_timestamp"], "current_status": {"snapshot_month": item["snapshot_date"], "physical_progress_percentage": item["physical_progress_pct"], "current_estimated_cost": item["revised_cost_cr"], "expenditure_cr": item["expenditure_cr"], "planned_completion_date": None, "progress_delay_percentage_points": None}, "predicted_cost_overrun_percentage": item["predicted_cost_overrun_percentage"], "predicted_cost_overrun_amount_cr": item["predicted_cost_overrun_amount_cr"], "predicted_final_cost_cr": item["predicted_final_cost_cr"], "predicted_delay_days": item["predicted_delay_days"], "predicted_cost_overrun": item["predicted_cost_overrun_percentage"], "predicted_completion_date": None, "current_progress": item["physical_progress_pct"], "predicted_delay_months": item["predicted_delay_months"], "risk_score": item["risk_score"], "risk_probability_percentage": None, "risk_level": item["risk_level"], "model_confidence_percentage": None, "confidence_calibration_status": item["confidence_calibration_status"], "explanation": [], "shap_explanation": [], "cost_factors": [], "delay_factors": [], "risk_factors": [], "best_models": {"cost": best_models.get("cost_regressor") or best_models.get("cost") or item["model_version"], "delay": best_models.get("schedule_regressor") or best_models.get("delay") or item["model_version"]}, "expected_range": None, "completion_probabilities": [], "features_used": [], "model_scope": item["model_scope"]}
     return {"record": record, "forecast": forecast}
 
 
