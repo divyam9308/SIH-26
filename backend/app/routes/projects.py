@@ -67,7 +67,6 @@ def prediction(code: str, window: str | None = None):
         raise HTTPException(404, "Project not found")
     except ValueError as exc:
         raise HTTPException(409, str(exc))
-
 @router.get("/{code}/forecast", response_model=ForecastResponse)
 def forecast(code: str, window: str | None = None):
     if window:
