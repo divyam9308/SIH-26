@@ -6,18 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  compare:
+  build-baseline:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Checkout candidate branch
-        uses: actions/checkout@v4
-
       - name: Checkout integration baseline
         uses: actions/checkout@v4
         with:
           ref: frontend-backend-integration
-          path: baseline-src
 
       - uses: actions/setup-python@v5
         with:
@@ -28,7 +24,6 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Build frozen integration baseline
-        working-directory: baseline-src
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -42,10 +37,39 @@ jobs:
               2025,
               data=data,
               identity=identity,
-              artifact_root=Path('../baseline-output'),
+              artifact_root=Path('baseline-output'),
               verify_frozen_reference=True,
           )
           PY
+
+      - name: Upload frozen baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr191-frozen-baseline
+          path: baseline-output/2001_2021/evaluation_results.json
+          if-no-files-found: error
+
+  compare:
+    needs: build-baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Download frozen baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: pr191-frozen-baseline
+          path: baseline-output/2001_2021
 
       - name: Install rebuilt frozen reference for comparison
         run: |
