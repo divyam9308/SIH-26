@@ -17,13 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      # Keep the exact six strict-forward production folds, but use two outer
-      # folds at a time and two internal canonical OOF jobs per fit. On the
-      # four-core hosted runner this uses the available cores without nested
-      # oversubscription. Model/features/targets/cohorts are unchanged.
+      # Keep the exact six strict-forward production folds and the exact
+      # canonical model/evaluation contract. Two outer cutoff fits still run
+      # concurrently; each canonical fit may use up to three independent
+      # internal OOF workers. This is orchestration-only and is intended to
+      # avoid the six-hour hosted-runner timeout seen with the 2x2 layout.
       POST_EXP113_OOF_WORKERS: '2'
       POST_EXP113_THREADS_PER_WORKER: '1'
-      SIH_FOLD_JOBS: '2'
+      SIH_FOLD_JOBS: '3'
       SIH_MODEL_THREADS: '1'
       PYTHONUNBUFFERED: '1'
     steps:
