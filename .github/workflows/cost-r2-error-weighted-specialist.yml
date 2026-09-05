@@ -1,0 +1,108 @@
+name: Cost R2 error-weighted specialist experiment
+
+on:
+  push:
+    branches:
+      - experiment/cost-r2-error-weighted-specialist
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile
+        run: python -m compileall backend scripts tests
+      - name: Focused tests
+        run: pytest -q tests/test_cost_r2_error_weighted_specialist.py
+
+  production-oof:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        oof_year: [2018, 2019, 2020, 2021]
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      NUMEXPR_NUM_THREADS: '2'
+      LOKY_MAX_CPU_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Generate strict production OOF shard
+        run: python scripts/run_cost_r2_error_weighted_specialist.py --oof-year ${{ matrix.oof_year }}
+      - name: Upload strict production OOF shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-r2-weighted-production-oof-${{ matrix.oof_year }}
+          if-no-files-found: error
+          retention-days: 7
+          path: test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_${{ matrix.oof_year }}.pkl
+
+  experiment:
+    needs: production-oof
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      NUMEXPR_NUM_THREADS: '2'
+      LOKY_MAX_CPU_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Download strict production OOF shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cost-r2-weighted-production-oof-*
+          path: test-output/cost-r2-error-weighted-specialist/oof-shards
+          merge-multiple: true
+      - name: Verify all strict OOF shards arrived
+        run: |
+          ls -lh test-output/cost-r2-error-weighted-specialist/oof-shards
+          test -f test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_2018.pkl
+          test -f test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_2019.pkl
+          test -f test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_2020.pkl
+          test -f test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_2021.pkl
+      - name: Run frozen weighted Cost R2 experiment from precomputed OOF
+        run: python scripts/run_cost_r2_error_weighted_specialist.py --oof-dir test-output/cost-r2-error-weighted-specialist/oof-shards
+      - name: Show result
+        if: always()
+        run: |
+          if [ -f test-output/cost-r2-error-weighted-specialist/experiment_result.json ]; then
+            cat test-output/cost-r2-error-weighted-specialist/experiment_result.json
+          fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-r2-error-weighted-specialist-result
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            test-output/cost-r2-error-weighted-specialist/experiment_result.json
+            test-output/cost-r2-error-weighted-specialist/oof-shards/production_oof_*.pkl
+            test-output/cost-r2-error-weighted-specialist/baseline/2001_2021/evaluation_results.json
+            test-output/cost-r2-error-weighted-specialist/baseline/2001_2021/prediction_validation.csv
