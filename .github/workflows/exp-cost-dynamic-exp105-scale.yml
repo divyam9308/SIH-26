@@ -1,0 +1,43 @@
+name: Dynamic Exp105 scale experiment
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/post_exp105_cost_common.py'
+      - 'backend/app/ml/experiments/exp_cost_dynamic_exp105_scale.py'
+      - 'tests/test_exp_cost_dynamic_exp105_scale.py'
+      - '.github/workflows/exp-cost-dynamic-exp105-scale.yml'
+  workflow_dispatch:
+
+jobs:
+  compare:
+    name: full 2001-2021 comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUNBUFFERED: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Focused tests
+        run: pytest -q tests/test_exp_cost_dynamic_exp105_scale.py
+      - name: Full leakage-safe comparison
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: python -m backend.app.ml.experiments.exp_cost_dynamic_exp105_scale --output audit_outputs/exp_cost_dynamic_exp105_scale.json
+      - name: Show result
+        if: always()
+        run: test ! -f audit_outputs/exp_cost_dynamic_exp105_scale.json || cat audit_outputs/exp_cost_dynamic_exp105_scale.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp-cost-dynamic-exp105-scale
+          path: audit_outputs/exp_cost_dynamic_exp105_scale.json
+          if-no-files-found: warn
