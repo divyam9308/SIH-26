@@ -11,8 +11,8 @@ import json
 import math
 import os
 import logging
-import fcntl
 import re
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -21,6 +21,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import joblib
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # pragma: no cover - exercised on Windows
+    fcntl = None
+    import msvcrt
 
 from backend.app.ml.production_cost_baseline import target_feature_contract
 from backend.app.services.monthly_prediction_service import MODEL_ROOT, TRAJECTORIES, _validate_bundle_provenance
@@ -314,6 +320,28 @@ def _persist(window: str, entry: dict) -> None:
             temporary.unlink()
 
 
+@contextmanager
+def _exclusive_lock(path: Path):
+    """Lock a small sidecar file on both POSIX and Windows."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as lock:
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        else:
+            lock.seek(0)
+            lock.write(b'0')
+            lock.flush()
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            else:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 def local_explanation(window: str, code: str, snapshot_date: str, identity: str | None = None) -> dict | None:
     identity = identity or _identity(window)
     path = _output_path(window)
@@ -344,8 +372,7 @@ def build_local_explanation(window: str, code: str, snapshot_date: str | None = 
         return cached
     # Separate lock inode survives atomic cache replacement. Serialize misses
     # per window across API threads/workers and the offline warmer.
-    with _output_path(window).with_suffix('.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _exclusive_lock(_output_path(window).with_suffix('.lock')):
         identity = _identity(window)
         cached = local_explanation(window, code, snapshot_date, identity)
         if cached:
