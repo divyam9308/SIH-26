@@ -1,9 +1,6 @@
 name: Cost R2 error-weighted specialist experiment
 
 on:
-  push:
-    branches:
-      - experiment/cost-r2-error-weighted-specialist
   workflow_dispatch:
 
 jobs:
