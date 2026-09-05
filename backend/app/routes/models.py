@@ -8,6 +8,7 @@ from backend.app.services.monthly_prediction_service import DEFAULT_PRODUCTION_W
 from backend.app.ml.residual_overrun_experiment import run_residual_overrun_experiment
 from backend.app.services.portfolio_service import invalidate_portfolio_cache
 from backend.app.services.prediction_service import clear_prediction_caches
+from backend.app.services.training_window_performance_service import training_window_performance
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -88,6 +89,14 @@ def rolling_validation(model_version: str | None = None, model: str | None = Non
 @router.get("/monthly-lifecycle-comparison")
 def monthly_lifecycle_comparison():
     return lifecycle_comparison()
+
+
+@router.get("/training-window-performance")
+def training_window_metrics():
+    try:
+        return training_window_performance()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
 
 
 @router.get("/monthly-lifecycle-evolution/{project_id}")
