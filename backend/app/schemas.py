@@ -68,6 +68,13 @@ class CapabilityStatus(ContractModel):
     source: str | None = None
 
 
+class ExplanationProvenance(ContractModel):
+    run_id: str | None
+    dataset_fingerprint: str | None
+    cache_identity: str
+    method: str
+
+
 class OperationalDriver(ContractModel):
     type: str
     label: str
@@ -127,6 +134,7 @@ class ForecastResponse(ContractModel):
     delay_explanation_status: CapabilityStatus
     risk_explanation_status: CapabilityStatus
     operational_drivers: list[OperationalDriver]
+    explanation_provenance: ExplanationProvenance | None = None
     best_models: BestModels
     expected_range: ExpectedRange | None
     completion_probabilities: list[CompletionProbability]

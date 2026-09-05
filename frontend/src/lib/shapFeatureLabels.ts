@@ -12,6 +12,7 @@ const DISPLAY_LABELS: Record<string, string> = {
   snapshot_date: 'Reporting Snapshot Date',
   schedule_slippage_days: 'Existing Schedule Slippage',
   cost_escalation_percentage: 'Recorded Cost Escalation',
+  progress_deviation: 'Progress Deviation',
   cumulative_expenditure_cr: 'Cumulative Expenditure',
   implementing_agency: 'Implementing Agency',
   agency_average_delay: 'Agency Average Delay',

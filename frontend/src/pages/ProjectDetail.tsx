@@ -123,7 +123,7 @@ export function ProjectDetail() {
     </ProjectPanel>
 
     <ProjectPanel className="operational-panel" title="Operational Drivers" subtitle="Observed warning signals derived directly from available PAIMANA project records.">
-      <div className="operational-panel-body">{forecast?.operational_drivers.length ? <ul className="operational-driver-list">{forecast.operational_drivers.map((driver) => <li key={driver.type}><div className="factor-top"><b>{driver.label}</b><span className="factor-weight">Observed signal</span></div><p>{driver.evidence}</p></li>)}</ul> : <p className="section-unavailable">No verified operational drivers were available for this project snapshot.</p>}</div>
+      <div className="operational-panel-body">{forecast?.operational_drivers.length ? <ul className="operational-driver-list">{forecast.operational_drivers.map((driver) => <li key={driver.type}><div className="factor-top"><b>{driver.label}</b><span className="factor-weight">Observed signal</span></div><p>{driver.evidence}</p></li>)}</ul> : <p className="section-unavailable">No material operational warning signal was identified from the available PAIMANA records for this snapshot.</p>}</div>
     </ProjectPanel>
 
     <ProjectPanel className="future-integration" title="Future Integration — Administrative Cause Intelligence" subtitle="Potential future integration with additional authorised project-monitoring data." action={<span className="proposed-badge">Proposed</span>}>

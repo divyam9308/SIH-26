@@ -50,6 +50,8 @@ See [`docs/data_pipeline.md`](docs/data_pipeline.md) and [`docs/data-provenance.
 
 The judging flow is available at **Project Forecast**. It selects a project, loads its most recent longitudinal snapshot, and shows predicted cost escalation, delay, risk level, and feature-level SHAP factors through `GET /api/projects/{project_id}/forecast`.
 
+Frozen Project Detail explanations are prepublished and integrity checked rather than computed during the request. See [Project explanation publication](docs/project-explanation-publication.md) for publication, coverage validation, saved-view rebuilding, and interpretation boundaries.
+
 `data/project_history.csv` is a deterministic synthetic monthly demonstration dataset, documented in [`docs/data_source.md`](docs/data_source.md). It demonstrates the replaceable PAIMANA/OCMS-compatible schema and must be replaced with an authorised monthly export before operational use. Train it with:
 
 ```bash
