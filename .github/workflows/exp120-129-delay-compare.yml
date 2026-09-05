@@ -6,6 +6,8 @@ on:
       - 'backend/app/ml/experiments/exp12*_delay.py'
       - 'backend/app/ml/experiments/post_exp113_delay_common.py'
       - 'backend/app/ml/experiments/run_exp120_129.py'
+      - 'backend/app/ml/production_exp105_exp113_fast.py'
+      - '.github/workflows/exp120-129-delay-compare.yml'
   workflow_dispatch:
 
 jobs:
@@ -15,8 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      POST_EXP113_OOF_WORKERS: '2'
-      POST_EXP113_THREADS_PER_WORKER: '2'
+      # Keep the exact six strict-forward production folds and the exact
+      # canonical model/evaluation contract. Use all four supported outer
+      # production-OOF workers so the six folds finish within the hosted
+      # runner's hard six-hour limit; model threads remain pinned to one.
+      POST_EXP113_OOF_WORKERS: '4'
+      POST_EXP113_THREADS_PER_WORKER: '1'
+      SIH_FOLD_JOBS: '3'
+      SIH_MODEL_THREADS: '1'
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +41,7 @@ jobs:
           echo "EXP=$EXP" >> "$GITHUB_ENV"
       - name: Syntax check
         run: |
-          python -m py_compile backend/app/ml/experiments/post_exp113_delay_common.py backend/app/ml/experiments/run_exp120_129.py backend/app/ml/experiments/exp${EXP}_delay.py
+          python -m py_compile backend/app/ml/production_exp105_exp113_fast.py backend/app/ml/experiments/post_exp113_delay_common.py backend/app/ml/experiments/run_exp120_129.py backend/app/ml/experiments/exp${EXP}_delay.py
       - name: Fresh production-vs-experiment comparison
         env:
           PYTHONPATH: '${{ github.workspace }}'
