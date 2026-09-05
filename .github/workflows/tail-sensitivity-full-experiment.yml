@@ -9,7 +9,7 @@ on:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - name: Checkout experiment branch
         uses: actions/checkout@v4
@@ -52,6 +52,8 @@ jobs:
           PY
 
       - name: Run leakage-safe tail sensitivity analysis
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python scripts/run_tail_sensitivity_2001_2021.py \
             --ledger test-output/tail-sensitivity-baseline/2001_2021/prediction_validation.csv \
