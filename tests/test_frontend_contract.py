@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import pytest
 from pathlib import Path
@@ -28,6 +29,31 @@ def test_paginated_project_contract_matches_five_direct_forecasts():
         assert item["model_version"] == authoritative["model_version"]
         assert "cost_factors" not in item
         assert "shap_explanation" not in item
+
+
+def test_live_explanations_match_the_final_displayed_outputs():
+    from backend.app.ml.real_time_windows import FEATURES, active_version, apply_historical_priors
+    from backend.app.services.data_service import get_project
+    from backend.app.services import prediction_service
+
+    item = client.get("/api/projects?page=1&page_size=1").json()["items"][0]
+    code = item["project_code"]
+    forecast = client.get(f"/api/projects/{code}/forecast").json()
+    version = active_version()
+    signature = prediction_service.active_model_signature(version)
+    bundle = prediction_service._active_model_bundle(version, signature)
+    project = get_project(code)
+    inputs = prediction_service._model_inputs(project)
+    if bundle["priors"]:
+        inputs = apply_historical_priors(inputs, bundle["priors"])
+    inputs = inputs[bundle["metadata"].get("features_used", FEATURES)]
+    explanation = prediction_service._live_explanations(
+        version, signature, code, forecast["dataset_snapshot_date"], prediction_service._input_hash(inputs)
+    )
+    assert abs(explanation["cost"]["prediction"] - forecast["predicted_cost_overrun_percentage"]) <= 0.01
+    assert abs(explanation["delay"]["prediction"] - forecast["predicted_delay_days"]) <= 0.1
+    assert abs(explanation["risk"]["prediction"] * 100 - forecast["risk_probability_percentage"]) <= 0.1
+    assert all(abs(value["prediction"] - value["reconstructed_prediction"]) <= 0.01 for value in explanation.values())
 
 
 def test_project_contract_preserves_nulls_and_forecast_provenance():
@@ -105,6 +131,27 @@ def test_saved_historical_views_are_repository_relative_not_cwd(monkeypatch, tmp
     range_portfolio_service.invalidate_range_cache()
 
 
+def test_saved_view_rejects_a_stale_embedded_explanation_artifact(monkeypatch, tmp_path):
+    saved_root = tmp_path / "saved"
+    saved_root.mkdir()
+    artifact = tmp_path / "project_explanations.jsonl"
+    artifact.write_text("published\n")
+    payload = {
+        "window": "2001_2021",
+        "items": [{
+            "project_code": "P1", "project_name": "Project", "snapshot_date": "2023-01-31",
+            "predicted_cost_overrun_percentage": 1.0, "predicted_delay_days": 2.0, "risk_level": "LOW",
+        }],
+    }
+    (saved_root / "2001_2021.json").write_text(json.dumps({
+        "explanation_artifact_sha256": "not-the-real-sha", "payload": payload,
+    }))
+    monkeypatch.setattr(range_portfolio_service, "SAVED_WINDOW_ROOT", saved_root)
+    monkeypatch.setattr(range_portfolio_service, "explanation_output_path", lambda _window: artifact)
+    with pytest.raises(ValueError, match="missing or stale explanation artifact"):
+        range_portfolio_service._saved_payload("2001_2021")
+
+
 def test_missing_historical_artifacts_return_controlled_response(monkeypatch, tmp_path):
     monkeypatch.setattr(range_portfolio_service, "MODEL_ROOT", tmp_path / "models")
     monkeypatch.setattr(range_portfolio_service, "SAVED_WINDOW_ROOT", tmp_path / "saved")
@@ -135,26 +182,51 @@ def test_historical_project_detail_honours_selected_window():
     assert forecast.json()["model_version"] == item["model_version"]
 
 
+def test_legacy_2001_2017_view_keeps_explanations_explicitly_unavailable():
+    forecast = client.get("/api/projects/N04000040/forecast", params={"window": "2001_2017"})
+    assert forecast.status_code == 200
+    payload = forecast.json()
+    assert payload["cost_factors"] == payload["delay_factors"] == payload["risk_factors"] == []
+    assert payload["operational_drivers"] == []
+    assert payload["explanation_provenance"] is None
+    assert all(
+        payload[f"{target}_explanation_status"]["available"] is False
+        for target in ("cost", "delay", "risk")
+    )
+
+
 def test_historical_detail_capabilities_use_only_the_selected_frozen_window(monkeypatch):
     code = "N24000633"
     window = "2001_2021"
-    unavailable = {
-        "available": False,
-        "reason": "Frozen explanation unavailable: frozen reproduction mismatch",
-        "source": "frozen_evaluation_ledger",
-    }
-    # Keep this window-selection contract test focused: reconstruction itself
-    # is covered separately and must never fall back to the live model.
-    monkeypatch.setattr(range_portfolio_service, "verified_explanation", lambda *_args: (None, unavailable))
+    # A normal detail request must only read published data and must never
+    # reconstruct SHAP or fall back to the active live model.
+    from backend.app.services import frozen_explanation_service
+    monkeypatch.setattr(frozen_explanation_service, "build_local_explanation", lambda *_args: (_ for _ in ()).throw(AssertionError("request-time build")))
     record = client.get(f"/api/projects/{code}", params={"window": window})
     forecast = client.get(f"/api/projects/{code}/forecast", params={"window": window})
     peers = client.get(f"/api/projects/{code}/peers", params={"window": window})
     warnings = client.get(f"/api/projects/{code}/warnings", params={"window": window})
     assert record.status_code == forecast.status_code == peers.status_code == warnings.status_code == 200
     assert record.json()["snapshot_date"] == forecast.json()["dataset_snapshot_date"]
-    assert forecast.json()["cost_explanation_status"] == unavailable
+    assert {"cost_factors", "delay_factors", "risk_factors", "operational_drivers"}.issubset(forecast.json())
+    assert forecast.json()["cost_explanation_status"]["source"] in {None, "frozen_verified_local_explanation"}
     assert peers.json()["peer_count"] > 0
     assert warnings.json()["source"] == "official_snapshot_trajectory"
+
+
+def test_2001_2021_explanation_summary_uses_published_additive_metadata_only():
+    forecast = client.get("/api/projects/N24000633/forecast", params={"window": "2001_2021"})
+    assert forecast.status_code == 200
+    payload = forecast.json()
+    for target in ("cost", "delay", "risk"):
+        summary = payload[f"{target}_explanation_summary"]
+        assert summary["available"] is True
+        assert summary["reconstruction_verified"] is True
+        assert summary["prediction"] == pytest.approx(summary["base_value"] + summary["net_feature_impact"], abs=1e-6)
+        assert summary["net_feature_impact"] == pytest.approx(summary["displayed_factors_impact"] + summary["other_features_impact"], abs=1e-6)
+        assert "future outcomes are excluded" in summary["reference_description"]
+    assert payload["risk_explanation_summary"]["output"] == "predicted_class_probability"
+    assert payload["risk_explanation_summary"]["predicted_class"]
 
 
 def test_historical_peers_do_not_fall_back_to_the_live_project_dataset():
