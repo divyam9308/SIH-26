@@ -2,7 +2,7 @@
 
 This module intentionally contains no experiment-specific routing overrides. Each
 window calls the same Exp105 Cost + Exp113 Delay production trainer used by main,
-including the window-specific AFT routing policy introduced by PR #186.
+with the same live-retraining reference verification policy.
 """
 from __future__ import annotations
 
@@ -48,8 +48,7 @@ def get_window(label: str) -> dict:
 
 
 def _metric_value(metrics: dict, target: str, name: str) -> float:
-    value = metrics[target][name]
-    return float(value)
+    return float(metrics[target][name])
 
 
 def run_window(
@@ -59,7 +58,7 @@ def run_window(
     identity: pd.DataFrame | None = None,
     artifact_root: Path | None = None,
 ) -> dict:
-    """Run one fixed comparison window using the unmodified current production trainer."""
+    """Run one fixed comparison window using the live current-production trainer."""
     window = get_window(label)
     if data is None or identity is None:
         built_data, built_identity = build_training_dataset()
@@ -68,12 +67,7 @@ def run_window(
 
     if artifact_root is None:
         with tempfile.TemporaryDirectory(prefix=f"dataset-window-{label}-") as tmp:
-            return run_window(
-                label,
-                data=data,
-                identity=identity,
-                artifact_root=Path(tmp),
-            )
+            return run_window(label, data=data, identity=identity, artifact_root=Path(tmp))
 
     result = train_window_with_promoted_cost_and_delay(
         window["training_start"],
@@ -82,6 +76,7 @@ def run_window(
         data=data,
         identity=identity,
         artifact_root=artifact_root,
+        verify_frozen_reference=False,
     )
 
     metrics = result["lifecycle"]["metrics"]
@@ -108,7 +103,7 @@ def run_window(
         "delay_routing_policy": delay_contract.get("routing_policy"),
         "delay_aft_projects": delay_contract.get("aft_eligible_projects"),
         "delay_fallback_projects": delay_contract.get("fallback_projects"),
-        "production_main_contract": "PR186 window-specific AFT routing; no experiment-only patching",
+        "production_main_contract": "current main live retraining semantics; verify_frozen_reference=False",
     }
 
 
