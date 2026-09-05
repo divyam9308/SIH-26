@@ -53,6 +53,8 @@ jobs:
           cp baseline-output/2001_2021/evaluation_results.json models/monthly_lifecycle/2001_2021/evaluation_results.json
 
       - name: Run Delay R2 candidate comparison
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: python scripts/run_delay_r2_2001_2021.py
 
       - name: Show verdict
