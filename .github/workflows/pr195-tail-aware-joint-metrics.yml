@@ -1,0 +1,49 @@
+name: PR195 tail-aware joint metrics
+
+on:
+  push:
+    branches:
+      - exp-tail-aware-joint-metrics-2001-2021
+  workflow_dispatch:
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Validate sources
+        run: python -m compileall backend scripts tests
+
+      - name: Run focused tests
+        run: pytest -q tests/test_tail_aware_joint_metrics.py
+
+      - name: Run full frozen-window experiment
+        run: python scripts/run_tail_aware_joint_metrics_2001_2021.py
+
+      - name: Show result
+        if: always()
+        run: |
+          if [ -f test-output/tail-aware-joint-metrics-2001-2021/experiment_result.json ]; then
+            cat test-output/tail-aware-joint-metrics-2001-2021/experiment_result.json
+          fi
+
+      - name: Upload experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr195-tail-aware-joint-metrics-result
+          if-no-files-found: error
+          path: |
+            test-output/tail-aware-joint-metrics-2001-2021/experiment_result.json
+            test-output/tail-aware-joint-metrics-2001-2021/baseline/2001_2021/evaluation_results.json
+            test-output/tail-aware-joint-metrics-2001-2021/baseline/2001_2021/prediction_validation.csv
