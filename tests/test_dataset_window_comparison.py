@@ -18,7 +18,15 @@ def test_run_window_uses_current_production_signature(monkeypatch, tmp_path: Pat
     identity = pd.DataFrame({"row_index": [0], "identity_verified": [True]})
     observed = {}
 
-    def fake_train(training_start, training_end, test_end, data=None, identity=None, artifact_root=None):
+    def fake_train(
+        training_start,
+        training_end,
+        test_end,
+        data=None,
+        identity=None,
+        artifact_root=None,
+        verify_frozen_reference=True,
+    ):
         observed.update(
             training_start=training_start,
             training_end=training_end,
@@ -26,6 +34,7 @@ def test_run_window_uses_current_production_signature(monkeypatch, tmp_path: Pat
             data=data,
             identity=identity,
             artifact_root=artifact_root,
+            verify_frozen_reference=verify_frozen_reference,
         )
         return {
             "lifecycle": {
@@ -60,13 +69,14 @@ def test_run_window_uses_current_production_signature(monkeypatch, tmp_path: Pat
     assert observed["data"] is data
     assert observed["identity"] is identity
     assert observed["artifact_root"] == tmp_path
+    assert observed["verify_frozen_reference"] is False
     assert result["cost_mae"] == 12.5
     assert result["delay_mae_days"] == 345.0
     assert result["comparison_projects"] == 7
     assert result["comparison_snapshots"] == 70
     assert result["delay_aft_projects"] == 6
     assert result["delay_fallback_projects"] == 1
-    assert result["production_main_contract"].startswith("PR186")
+    assert result["production_main_contract"].startswith("current main")
 
 
 def test_unknown_window_rejected():
