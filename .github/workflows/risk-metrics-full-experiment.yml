@@ -53,6 +53,8 @@ jobs:
           cp baseline-output/2001_2021/evaluation_results.json models/monthly_lifecycle/2001_2021/evaluation_results.json
 
       - name: Run Risk metrics candidate comparison
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: python scripts/run_risk_metrics_2001_2021.py
 
       - name: Show verdict
