@@ -12,6 +12,13 @@ from backend.app.services.data_service import project_dataset_signature, project
 from backend.app.services.prediction_service import active_model_signature, project_forecast
 from backend.app.services.range_portfolio_service import portfolio_payload as historical_portfolio_payload, supported_windows
 
+DETAIL_ONLY_FIELDS = frozenset({
+    "cost_factors", "delay_factors", "risk_factors", "cost_explanation_status",
+    "delay_explanation_status", "risk_explanation_status", "operational_drivers",
+    "explanation_provenance", "cost_explanation_summary", "delay_explanation_summary",
+    "risk_explanation_summary",
+})
+
 
 def _safe_number(value, digits: int = 2):
     return None if pd.isna(value) else round(float(value), digits)
@@ -101,6 +108,11 @@ def portfolio_payload(window: str | None = None) -> dict:
 
 def portfolio_rows(window: str | None = None) -> list[dict]:
     return portfolio_payload(window)["items"]
+
+
+def portfolio_risk_rows(window: str | None = None) -> list[dict]:
+    """Rows for the dashboard risk API, without project-detail payloads."""
+    return [{key: value for key, value in row.items() if key not in DETAIL_ONLY_FIELDS} for row in portfolio_rows(window)]
 
 
 def invalidate_portfolio_cache() -> None:
@@ -206,13 +218,7 @@ def project_page(*, page: int, page_size: int, search: str | None, sector: str |
     pages = max(1, math.ceil(total / page_size))
     selected_page = min(page, pages)
     start = (selected_page - 1) * page_size
-    detail_only = {
-        "cost_factors", "delay_factors", "risk_factors", "cost_explanation_status",
-        "delay_explanation_status", "risk_explanation_status", "operational_drivers",
-        "explanation_provenance", "cost_explanation_summary", "delay_explanation_summary",
-        "risk_explanation_summary",
-    }
-    page_rows = [{key: value for key, value in row.items() if key not in detail_only} for row in rows[start:start + page_size]]
+    page_rows = [{key: value for key, value in row.items() if key not in DETAIL_ONLY_FIELDS} for row in rows[start:start + page_size]]
     levels = {key: 0 for key in ("critical", "high", "medium", "low")}
     exposure = {key: 0.0 for key in levels}
     for row in all_rows:
