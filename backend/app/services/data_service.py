@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -10,14 +11,27 @@ from backend.app.core.config import PROCESSED_DIR, RAW_DIR
 from backend.app.ml.features import engineer_temporal_features, load_project_history
 
 DATE_COLUMNS = ["snapshot_date", "original_end_date", "revised_end_date"]
+PROJECT_DATASET = PROCESSED_DIR / "model_dataset.csv"
+
+
+def project_dataset_signature() -> str:
+    """Return a content key that changes whenever the processed dataset changes."""
+    stat = PROJECT_DATASET.stat()
+    digest = hashlib.sha256(PROJECT_DATASET.read_bytes()).hexdigest()
+    return f"{stat.st_size}:{digest}"
 
 
 @lru_cache(maxsize=1)
-def projects_df() -> pd.DataFrame:
-    df = pd.read_csv(PROCESSED_DIR / "model_dataset.csv", dtype={"project_code": str})
+def _projects_df_cached(dataset_signature: str) -> pd.DataFrame:
+    del dataset_signature
+    df = pd.read_csv(PROJECT_DATASET, dtype={"project_code": str})
     for c in DATE_COLUMNS:
         df[c] = pd.to_datetime(df[c], errors="coerce")
     return df
+
+
+def projects_df() -> pd.DataFrame:
+    return _projects_df_cached(project_dataset_signature())
 
 
 @lru_cache(maxsize=1)

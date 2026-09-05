@@ -50,6 +50,8 @@ See [`docs/data_pipeline.md`](docs/data_pipeline.md) and [`docs/data-provenance.
 
 The judging flow is available at **Project Forecast**. It selects a project, loads its most recent longitudinal snapshot, and shows predicted cost escalation, delay, risk level, and feature-level SHAP factors through `GET /api/projects/{project_id}/forecast`.
 
+Frozen Project Detail explanations are prepublished and integrity checked rather than computed during the request. See [Project explanation publication](docs/project-explanation-publication.md) for publication, coverage validation, saved-view rebuilding, and interpretation boundaries.
+
 `data/project_history.csv` is a deterministic synthetic monthly demonstration dataset, documented in [`docs/data_source.md`](docs/data_source.md). It demonstrates the replaceable PAIMANA/OCMS-compatible schema and must be replaced with an authorised monthly export before operational use. Train it with:
 
 ```bash
@@ -139,6 +141,32 @@ SIH-26/
 The organization mirrors the feature/page/service separation used in `fyndbridge-ats`, but intentionally avoids putting an entire feature into one huge page/controller file.
 
 ## Run locally
+
+### Full-stack frontend development
+
+`backend/` remains the authoritative FastAPI and ML implementation. The React
+application in `frontend/` is its only user interface and consumes it over
+`/api`; it does not contain model logic or model results.
+
+Start the API in one terminal:
+
+```bash
+PORT=8000 ./scripts/run_local.sh
+```
+
+Then start the Vite frontend in another:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite proxies `/api` to `http://127.0.0.1:8000`, so no development CORS rule is
+needed. `VITE_API_BASE_URL` may be set in `frontend/.env.local` when deploying
+against a different API origin; see `frontend/.env.example`. For FastAPI to
+serve the production UI itself, run `npm run build` in `frontend/` first; the
+backend serves `frontend/dist` and supports nested SPA routes.
 
 Python 3.11+ is recommended.
 

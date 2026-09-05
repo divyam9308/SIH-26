@@ -1,0 +1,148 @@
+{
+  "report_type": "canonical_lifecycle_production_evaluation",
+  "training_start": 2001,
+  "training_end": 2022,
+  "test_start": 2023,
+  "test_end": 2025,
+  "training_projects": 1817,
+  "evaluation_projects": 489,
+  "training_snapshots": 24419,
+  "evaluation_snapshots": 7073,
+  "dataset_fingerprint": "daef4225ed7d7a590854c14c492a0abc8e4ac0899b7751bdf9a373ce6ffab87b",
+  "model_version": "monthly-2001-2022",
+  "trainer_identity": "backend.app.ml.production_exp105_exp113_baseline.train_window_with_promoted_cost_and_delay",
+  "cost_model_identity": "exp61_plus_exp105_dynamic_factor_cost_v1",
+  "delay_model_identity": "exp61_u1_plus_exp113_quantile_aft_delay_v1",
+  "risk_model_identity": "existing_production_retained",
+  "cost_mae": 24.266,
+  "cost_rmse": 58.836,
+  "delay_mae": 294.287,
+  "delay_rmse": 408.298,
+  "risk_accuracy": 0.6144,
+  "risk_f1": 0.407,
+  "aft_routed_projects": 476,
+  "aft_routed_snapshots": 7006,
+  "aft_routed_mae": 295.981193,
+  "fallback_routed_projects": 13,
+  "fallback_routed_snapshots": 67,
+  "fallback_routed_mae": 349.540037,
+  "median_actual_delay": 1552.0,
+  "p90_actual_delay": 3318.0,
+  "p95_actual_delay": 4352.0,
+  "median_absolute_delay_error": 250.9769277816714,
+  "p90_absolute_delay_error": 761.3986263667238,
+  "evaluation_timestamp": "2026-09-04T16:44:26.118985+00:00",
+  "artifact_path": "/Users/divyamaggarwal/Desktop/SIH'26/SIH-26/models/monthly_lifecycle/2001_2022",
+  "top_10_delay_errors": [
+    {
+      "project_id": "220100327",
+      "project_name": "KHURDA ROAD - BARANG 3RD LINE (DL) (ECOR)",
+      "actual_delay": 5357.0,
+      "predicted_delay": 1785.5710547848896,
+      "absolute_error": 3571.4289452151106,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "220100240",
+      "project_name": "JAYANAGAR-DARBHANGA-NARKATIA GANJ(GC),ECR",
+      "actual_delay": 4627.0,
+      "predicted_delay": 1060.6718432386456,
+      "absolute_error": 3566.3281567613544,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 885.3992693894493,
+      "absolute_error": 3466.6007306105507,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "Rohtak-Meham Hansi",
+      "actual_delay": 4352.0,
+      "predicted_delay": 965.2675639841392,
+      "absolute_error": 3386.732436015861,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 969.5858499831022,
+      "absolute_error": 3382.414150016898,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 975.881869427256,
+      "absolute_error": 3376.118130572744,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "220100240",
+      "project_name": "JAYANAGAR-DARBHANGA-NARKATIA GANJ(GC),ECR",
+      "actual_delay": 4627.0,
+      "predicted_delay": 1256.002156528387,
+      "absolute_error": 3370.997843471613,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 1019.1925914526432,
+      "absolute_error": 3332.8074085473568,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 1052.8013782983394,
+      "absolute_error": 3299.1986217016606,
+      "routing_path": "AFT"
+    },
+    {
+      "project_id": "N22000272",
+      "project_name": "ROHTAK-MEHAM HANSI",
+      "actual_delay": 4352.0,
+      "predicted_delay": 1057.3363971175395,
+      "absolute_error": 3294.6636028824605,
+      "routing_path": "AFT"
+    }
+  ],
+  "comparison_2001_2021_vs_current": {
+    "reference_window": "2001_2021",
+    "current_window": "2001_2022",
+    "reference": {
+      "cost_mae": 25.923,
+      "delay_mae": 342.35,
+      "evaluation_projects": 728,
+      "evaluation_snapshots": 11546,
+      "aft_routed_projects": 688,
+      "fallback_routed_projects": 33,
+      "median_actual_delay": 1582.0,
+      "p90_actual_delay": 3589.0,
+      "p95_actual_delay": 4627.0,
+      "median_absolute_delay_error": 324.0084302767539,
+      "p90_absolute_delay_error": 917.5092163951103
+    },
+    "current": {
+      "cost_mae": 24.266,
+      "delay_mae": 294.287,
+      "evaluation_projects": 489,
+      "evaluation_snapshots": 7073,
+      "aft_routed_projects": 476,
+      "fallback_routed_projects": 13,
+      "median_actual_delay": 1552.0,
+      "p90_actual_delay": 3318.0,
+      "p95_actual_delay": 4352.0,
+      "median_absolute_delay_error": 250.9769277816714,
+      "p90_absolute_delay_error": 761.3986263667238
+    }
+  }
+}

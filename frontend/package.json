@@ -1,6 +1,32 @@
 {
-  "name": "infrasight-ui",
+  "name": "infrasight-ai-dashboard",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
-  "scripts": { "build": "node --check src/app.js && node --check src/pages/ForecastPage.js && node --check src/pages/ModelLabPage.js && node --check src/pages/ModelSimulationPage.js && node --check src/pages/PredictionAccuracyPage.js" }
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "latest",
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "recharts": "latest",
+    "tailwindcss": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "eslint": "latest",
+    "eslint-plugin-react-hooks": "latest",
+    "eslint-plugin-react-refresh": "latest",
+    "typescript": "latest",
+    "typescript-eslint": "latest",
+    "vite": "latest"
+  }
 }

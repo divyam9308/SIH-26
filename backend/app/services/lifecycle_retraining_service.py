@@ -17,7 +17,7 @@ import pandas as pd
 from backend.app.ml.monthly_lifecycle import OUTCOMES, SNAPSHOTS, SNAPSHOTS_GZ, build_training_dataset
 from backend.app.ml.monthly_training import MODEL_ROOT
 from backend.app.ml.production_cost_baseline import target_feature_contract
-from backend.app.ml.production_exp61_baseline import train_window_with_promoted_cost_and_delay
+from backend.app.ml.production_exp105_exp113_baseline import train_window_with_promoted_cost_and_delay
 from backend.app.ml.provenance import artifact_fingerprints, file_sha256
 from backend.app.services import monthly_prediction_service
 
@@ -30,6 +30,8 @@ _REQUIRED_ARTIFACTS = [
     "feature_quality_report.json",
     "shap_importance.json",
     "prediction_validation.csv",
+    "canonical_evaluation_report.json",
+    "canonical_evaluation_report.md",
 ]
 
 
@@ -75,6 +77,115 @@ def _stamp_production_role(result: dict, target: Path) -> None:
         evaluation = json.loads(evaluation_path.read_text())
         evaluation.setdefault("metadata", {})["model_role"] = "production"
         evaluation_path.write_text(json.dumps(evaluation, indent=2, allow_nan=False))
+
+
+def _finite(value) -> float | None:
+    value = pd.to_numeric(value, errors="coerce")
+    return float(value) if pd.notna(value) and float("-inf") < float(value) < float("inf") else None
+
+
+def _routing_summary(ledger: pd.DataFrame) -> dict:
+    paths = ledger.get("delay_routing_path", pd.Series("fallback", index=ledger.index)).fillna("fallback")
+    result = {}
+    for path, label in (("AFT", "aft"), ("fallback", "fallback")):
+        rows = ledger.loc[paths.eq(path)].copy()
+        errors = pd.to_numeric(rows.get("delay_error"), errors="coerce").abs()
+        weights = pd.to_numeric(rows.get("sample_weight"), errors="coerce").fillna(1.0)
+        valid = errors.notna() & weights.gt(0)
+        result[f"{label}_routed_projects"] = int(rows["canonical_project_id"].nunique())
+        result[f"{label}_routed_snapshots"] = int(len(rows))
+        result[f"{label}_routed_mae"] = (
+            round(float((errors[valid] * weights[valid]).sum() / weights[valid].sum()), 6)
+            if valid.any() else None
+        )
+    return result
+
+
+def _cohort_statistics(ledger: pd.DataFrame) -> dict:
+    actual = pd.to_numeric(ledger["actual_delay_days"], errors="coerce").dropna()
+    error = pd.to_numeric(ledger["delay_error"], errors="coerce").abs().dropna()
+    return {
+        "median_actual_delay": _finite(actual.quantile(.5)),
+        "p90_actual_delay": _finite(actual.quantile(.9)),
+        "p95_actual_delay": _finite(actual.quantile(.95)),
+        "median_absolute_delay_error": _finite(error.quantile(.5)),
+        "p90_absolute_delay_error": _finite(error.quantile(.9)),
+    }
+
+
+def _report_summary(result: dict, target: Path) -> dict:
+    metadata = result["metadata"]
+    metrics = result["lifecycle"]["metrics"]
+    ledger = pd.read_csv(target / "prediction_validation.csv", dtype={"canonical_project_id": str})
+    if ledger.empty or ledger["canonical_project_id"].isna().any():
+        # Multiple snapshots per canonical project are expected; identity itself
+        # must nevertheless be present on every immutable ledger row.
+        raise RuntimeError("Canonical evaluation ledger has missing project identities.")
+    numeric = ("predicted_cost_overrun", "predicted_delay_days")
+    if any(not pd.to_numeric(ledger[column], errors="coerce").map(lambda x: pd.notna(x) and abs(float(x)) != float("inf")).all() for column in numeric):
+        raise RuntimeError("Canonical evaluation ledger contains non-finite Cost or Delay predictions.")
+    delay_errors = ledger.assign(_abs=pd.to_numeric(ledger["delay_error"], errors="coerce").abs()).sort_values("_abs", ascending=False).head(10)
+    top_errors = [{
+        "project_id": str(row["canonical_project_id"]), "project_name": str(row["project_name"]),
+        "actual_delay": _finite(row["actual_delay_days"]), "predicted_delay": _finite(row["predicted_delay_days"]),
+        "absolute_error": _finite(row["_abs"]), "routing_path": str(row.get("delay_routing_path", "fallback")),
+    } for _, row in delay_errors.iterrows()]
+    identities = {
+        "trainer": "backend.app.ml.production_exp105_exp113_baseline.train_window_with_promoted_cost_and_delay",
+        "cost_model": metadata.get("production_cost_baseline"),
+        "delay_model": metadata.get("production_delay_baseline"),
+        "risk_model": "existing_production_retained",
+    }
+    routing = _routing_summary(ledger)
+    # Older immutable reference ledgers predate the per-row routing column.
+    # Retain their audited aggregate routing counts from the evaluation
+    # contract rather than falsely labelling every project as fallback.
+    if "delay_routing_path" not in ledger:
+        contract = (result.get("lifecycle") or {}).get("delay_evaluation_contract") or metadata.get("delay_evaluation_contract") or {}
+        routing["aft_routed_projects"] = contract.get("aft_eligible_projects", contract.get("calibration_cohort_projects", 0))
+        routing["fallback_routed_projects"] = contract.get("fallback_projects", routing["fallback_routed_projects"])
+    return {
+        "report_type": "canonical_lifecycle_production_evaluation",
+        "training_start": metadata["training_period"][0], "training_end": metadata["training_period"][1],
+        "test_start": metadata["testing_period"][0], "test_end": metadata["testing_period"][1],
+        "training_projects": metadata["unique_training_projects"], "evaluation_projects": int(ledger["canonical_project_id"].nunique()),
+        "training_snapshots": metadata["training_snapshots"], "evaluation_snapshots": int(len(ledger)),
+        "dataset_fingerprint": metadata.get("dataset_fingerprint"), "model_version": metadata.get("model_version"),
+        "trainer_identity": identities["trainer"], "cost_model_identity": identities["cost_model"],
+        "delay_model_identity": identities["delay_model"], "risk_model_identity": identities["risk_model"],
+        "cost_mae": metrics["cost"].get("MAE"), "cost_rmse": metrics["cost"].get("RMSE"),
+        "delay_mae": metrics["delay"].get("MAE"), "delay_rmse": metrics["delay"].get("RMSE"),
+        "risk_accuracy": metrics["risk"].get("accuracy"), "risk_f1": metrics["risk"].get("macro_f1"),
+        **routing, **_cohort_statistics(ledger),
+        "evaluation_timestamp": metadata.get("created_at"),
+        # Reports are first written in staging, but describe the stable
+        # canonical location that the atomic swap exposes to consumers.
+        "artifact_path": str(MODEL_ROOT / f"{metadata['training_period'][0]}_{metadata['training_period'][1]}"),
+        "top_10_delay_errors": top_errors,
+    }
+
+
+def _write_evaluation_reports(result: dict, target: Path) -> dict:
+    report = _report_summary(result, target)
+    reference_path = MODEL_ROOT / "2001_2021" / "canonical_evaluation_report.json"
+    if reference_path.exists():
+        reference = json.loads(reference_path.read_text())
+    else:
+        reference_raw = json.loads((MODEL_ROOT / "2001_2021" / "evaluation_results.json").read_text())
+        reference = _report_summary(reference_raw, MODEL_ROOT / "2001_2021")
+    fields = ("cost_mae", "delay_mae", "evaluation_projects", "evaluation_snapshots", "aft_routed_projects", "fallback_routed_projects", "median_actual_delay", "p90_actual_delay", "p95_actual_delay", "median_absolute_delay_error", "p90_absolute_delay_error")
+    report["comparison_2001_2021_vs_current"] = {
+        "reference_window": "2001_2021", "current_window": f"{report['training_start']}_{report['training_end']}",
+        "reference": {field: reference.get(field) for field in fields},
+        "current": {field: report.get(field) for field in fields},
+    }
+    (target / "canonical_evaluation_report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    lines = ["# Canonical lifecycle production evaluation", "", f"Window: {report['training_start']}–{report['training_end']} → {report['test_start']}–{report['test_end']}", "", "| Metric | Value |", "| --- | ---: |"]
+    lines.extend(f"| {label} | {report[key]} |" for key, label in (("cost_mae", "Cost MAE"), ("cost_rmse", "Cost RMSE"), ("delay_mae", "Delay MAE"), ("delay_rmse", "Delay RMSE"), ("risk_f1", "Risk macro F1"), ("evaluation_projects", "Evaluation projects"), ("evaluation_snapshots", "Evaluation snapshots"), ("aft_routed_projects", "AFT-routed projects"), ("fallback_routed_projects", "Fallback-routed projects")))
+    lines.extend(["", "## Top 10 Delay errors", "", "| Project | Actual | Predicted | Absolute error | Route |", "| --- | ---: | ---: | ---: | --- |"])
+    lines.extend(f"| {row['project_id']} — {row['project_name']} | {row['actual_delay']} | {row['predicted_delay']} | {row['absolute_error']} | {row['routing_path']} |" for row in report["top_10_delay_errors"])
+    (target / "canonical_evaluation_report.md").write_text("\n".join(lines) + "\n")
+    return report
 
 
 def _write_run_manifest(start_year: int, end_year: int, result: dict, target: Path | None = None) -> dict:
@@ -162,9 +273,18 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     staging_root = MODEL_ROOT / ".staging" / f"{window}-{uuid.uuid4().hex}"
     staging_root.mkdir(parents=True, exist_ok=False)
     try:
-        result = train_window_with_promoted_cost_and_delay(start_year, end_year, max_year, data=data, identity=identity, artifact_root=staging_root)
+        result = train_window_with_promoted_cost_and_delay(
+            start_year,
+            end_year,
+            max_year,
+            data=data,
+            identity=identity,
+            artifact_root=staging_root,
+            verify_frozen_reference=False,
+        )
         staged_target = staging_root / window
         _stamp_production_role(result, staged_target)
+        _write_evaluation_reports(result, staged_target)
         _write_run_manifest(start_year, end_year, result, staged_target)
         _publish_staged_run(staged_target, target)
     finally:
@@ -179,6 +299,11 @@ def retrain_lifecycle(start_year: int, end_year: int) -> dict:
     provenance = metadata.get("provenance", {})
     feature_contract = target_feature_contract(metadata)
     monthly_prediction_service._bundle.cache_clear()
+    # The optional saved view is materialized only after the complete,
+    # provenance-validated lifecycle bundle has been atomically published.
+    if window == "2001_2022":
+        from backend.app.services.range_portfolio_service import write_saved_window_view
+        write_saved_window_view(window)
     return {
         "status": "success",
         "model_role": "production",

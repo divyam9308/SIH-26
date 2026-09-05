@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
+from datetime import datetime, timezone
 from functools import lru_cache
 
 import joblib
@@ -9,13 +12,27 @@ import numpy as np
 import pandas as pd
 
 from backend.app.ml.real_time_windows import FEATURES, RISK_LEVELS, _predict_regressor, active_version, apply_historical_priors, apply_sector_correction, features, model_dir, predict_quantiles, scale_quantile_range
-from backend.app.services.data_service import get_project
-from backend.app.services.simulation_service import _shap_factors_for_model
+from backend.app.services.data_service import get_project, history_df, projects_df
+from backend.app.services.operational_driver_service import operational_drivers
+
+
+def active_model_signature(version: str) -> str:
+    """Key model caches by immutable version plus on-disk artifact identity."""
+    target = model_dir(version)
+    names = ("metadata.json", "cost_model.pkl", "delay_model.pkl", "risk_model.pkl", "uncertainty_models.pkl", "confidence_calibration.json")
+    parts = []
+    for name in names:
+        path = target / name
+        if path.exists():
+            stat = path.stat()
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(parts)
 
 
 @lru_cache(maxsize=4)
-def _active_model_bundle(version: str) -> dict:
+def _active_model_bundle(version: str, model_signature: str) -> dict:
     """Load one immutable versioned model bundle for reuse across forecasts."""
+    del model_signature
     target = model_dir(version)
     calibration_path = target / "confidence_calibration.json"
     corrections_path = target / "sector_corrections.json"
@@ -59,6 +76,109 @@ def _model_inputs(project: pd.Series) -> pd.DataFrame:
     return features(raw)
 
 
+def _input_hash(frame: pd.DataFrame) -> str:
+    values = {}
+    for name, value in frame.iloc[0].items():
+        if isinstance(value, pd.Timestamp):
+            value = value.isoformat()
+        elif isinstance(value, np.generic):
+            value = value.item()
+        elif pd.isna(value):
+            value = None
+        values[name] = value
+    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
+
+
+@lru_cache(maxsize=4)
+def _live_reference(version: str, model_signature: str) -> pd.DataFrame:
+    bundle = _active_model_bundle(version, model_signature)
+    metadata = bundle["metadata"]
+    for row in projects_df().sort_values("project_code").itertuples(index=False):
+        try:
+            reference = _model_inputs(pd.Series(row._asdict()))
+            if bundle["priors"]:
+                reference = apply_historical_priors(reference, bundle["priors"])
+            return reference[metadata.get("features_used", FEATURES)]
+        except (ValueError, KeyError):
+            continue
+    raise ValueError("No valid current PAIMANA project row is available as a deterministic explanation reference.")
+
+
+def _path_contributions(predict, row: pd.DataFrame, reference: pd.DataFrame, *, limit: int = 5) -> dict:
+    features_used = list(row.columns)
+    baseline = reference.iloc[0].copy()
+    base_value = float(predict(reference)[0])
+    prediction = float(predict(row)[0])
+    totals = np.zeros(len(features_used), dtype=float)
+    for order in (list(range(len(features_used))), list(range(len(features_used) - 1, -1, -1))):
+        working = baseline.copy()
+        states = []
+        for index in order:
+            working.iloc[index] = row.iloc[0, index]
+            states.append(working.copy())
+        outputs = np.asarray(predict(pd.DataFrame(states, columns=features_used)), dtype=float).reshape(-1)
+        previous = base_value
+        for index, current in zip(order, outputs):
+            totals[index] += float(current) - previous
+            previous = float(current)
+    values = totals / 2
+    reconstructed = base_value + float(values.sum())
+    tolerance = max(0.01, abs(prediction) * 0.001)
+    if not math.isfinite(reconstructed) or abs(reconstructed - prediction) > tolerance:
+        raise ValueError("Live explanation additivity validation failed for the final production output.")
+    all_factors = [
+        {"feature": feature, "impact": round(float(impact), 4), "direction": "increases" if impact >= 0 else "reduces"}
+        for feature, impact in sorted(zip(features_used, values), key=lambda item: (-abs(item[1]), item[0]))
+    ]
+    return {
+        "factors": all_factors[:limit], "all_factors": all_factors,
+        "base_value": base_value, "prediction": prediction,
+        "reconstructed_prediction": reconstructed,
+    }
+
+
+@lru_cache(maxsize=4096)
+def _live_explanations(version: str, model_signature: str, code: str, snapshot_date: str, model_input_hash: str) -> dict:
+    del snapshot_date, model_input_hash
+    project = get_project(code)
+    bundle = _active_model_bundle(version, model_signature)
+    metadata = bundle["metadata"]
+    row = _model_inputs(project)
+    if bundle["priors"]:
+        row = apply_historical_priors(row, bundle["priors"])
+    row = row[metadata.get("features_used", FEATURES)]
+    reference = _live_reference(version, model_signature).reindex(columns=row.columns)
+
+    def cost_predict(values: pd.DataFrame):
+        return apply_sector_correction(_predict_regressor(bundle["cost_model"], values), values, bundle["corrections"], "cost")
+
+    def delay_predict(values: pd.DataFrame):
+        raw = apply_sector_correction(_predict_regressor(bundle["delay_model"], values, delay_target=True), values, bundle["corrections"], "delay")
+        return np.maximum(0.0, np.asarray(raw, dtype=float))
+
+    predicted_class = int(np.asarray(bundle["risk_model"].predict(row), dtype=int).reshape(-1)[0])
+
+    def risk_predict(values: pd.DataFrame):
+        probabilities = np.asarray(bundle["risk_model"].predict_proba(values), dtype=float)
+        classes = [int(value) for value in getattr(bundle["risk_model"], "classes_", range(probabilities.shape[1]))]
+        return probabilities[:, classes.index(predicted_class)]
+
+    result = {}
+    for target, predictor in (("cost", cost_predict), ("delay", delay_predict), ("risk", risk_predict)):
+        try:
+            contribution = _path_contributions(predictor, row, reference)
+            result[target] = {
+                **contribution,
+                "status": {"available": True, "reason": None, "source": "live_final_output_local_contributions"},
+            }
+        except Exception as exc:
+            result[target] = {
+                "factors": [],
+                "status": {"available": False, "reason": f"Project-level explanation failed: {exc}", "source": None},
+            }
+    return result
+
+
 def _completion_probabilities(target, X: pd.DataFrame, planned: pd.Timestamp) -> list[dict]:
     path = target / "survival_model.pkl"
     if not path.exists():
@@ -82,7 +202,7 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     version = active_version()
     if not version:
         raise ValueError("No real PAIMANA time-window model is available. Retrain a model first.")
-    bundle = _active_model_bundle(version)
+    bundle = _active_model_bundle(version, active_model_signature(version))
     target = bundle["target"]
     metadata = bundle["metadata"]
     X = _model_inputs(project)
@@ -117,9 +237,18 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
     progress = pd.to_numeric(project.get("physical_progress_pct"), errors="coerce")
     revised = pd.to_numeric(project.get("revised_cost_cr"), errors="coerce")
     expenditure = pd.to_numeric(project.get("expenditure_cr"), errors="coerce")
-    factors = _shap_factors_for_model(cost_model, X.iloc[0]) if include_explanations else []
-    delay_factors = _shap_factors_for_model(delay_model, X.iloc[0]) if include_explanations else []
-    risk_factors = _shap_factors_for_model(risk_model, X.iloc[0]) if include_explanations else []
+    snapshot_date = pd.to_datetime(project.snapshot_date).strftime("%Y-%m-%d")
+    if include_explanations:
+        explanations = _live_explanations(version, active_model_signature(version), str(project.project_code), snapshot_date, _input_hash(X))
+    else:
+        disabled = {"factors": [], "status": {"available": False, "reason": "Explanation generation was disabled for this request.", "source": None}}
+        explanations = {target_name: disabled for target_name in ("cost", "delay", "risk")}
+    factors = explanations["cost"]["factors"]
+    delay_factors = explanations["delay"]["factors"]
+    risk_factors = explanations["risk"]["factors"]
+    history = history_df()
+    history = history[history["project_code"].astype(str).eq(str(project.project_code))]
+    drivers = operational_drivers(project, history, source="official_project_record")
     current_status = {
         "snapshot_month": pd.to_datetime(project.snapshot_date).strftime("%Y-%m-%d"),
         "physical_progress_percentage": None if pd.isna(progress) else round(float(progress), 1),
@@ -128,16 +257,29 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
         "planned_completion_date": planned.strftime("%Y-%m-%d"),
         "progress_delay_percentage_points": None,
     }
+    approved = float(project.original_cost_cr)
+    predicted_cost_overrun_amount = approved * cost / 100.0
+    predicted_final_cost = approved + predicted_cost_overrun_amount
+    predicted_completion = planned + pd.to_timedelta(delay, unit="D")
     return {
         "project_id": str(project.project_code), "project_name": project.project_name,
+        "model_version": version,
+        "dataset_snapshot_date": snapshot_date,
+        "inference_timestamp": datetime.now(timezone.utc).isoformat(),
         "current_status": current_status, "predicted_cost_overrun_percentage": round(cost, 2),
+        "predicted_cost_overrun_amount_cr": round(predicted_cost_overrun_amount, 2),
+        "predicted_final_cost_cr": round(predicted_final_cost, 2),
         "predicted_delay_days": round(delay, 1), "predicted_cost_overrun": round(cost, 2),
+        "predicted_completion_date": predicted_completion.strftime("%Y-%m-%d"),
         "current_progress": current_status["physical_progress_percentage"],
         "predicted_delay_months": round(delay / 30.4375, 1),
         "risk_score": round(probability * 100, 1), "risk_probability_percentage": round(probability * 100, 1), "risk_level": RISK_LEVELS[risk_prediction],
         "model_confidence_percentage": round(float(calibration.get("confidence_percentage", 0.0)), 1) if uncertainty else None,
         "confidence_calibration_status": calibration.get("status", "unavailable") if uncertainty else "unavailable",
         "explanation": factors, "shap_explanation": factors, "cost_factors": factors, "delay_factors": delay_factors, "risk_factors": risk_factors,
+        "cost_explanation_status": explanations["cost"]["status"], "delay_explanation_status": explanations["delay"]["status"], "risk_explanation_status": explanations["risk"]["status"],
+        "operational_drivers": drivers,
+        "explanation_provenance": {"run_id": None, "dataset_fingerprint": None, "cache_identity": active_model_signature(version), "method": "deterministic_two_path_final_output_contributions_v1"},
         "best_models": {"cost": metadata.get("algorithms", {}).get("cost", "registered model"), "delay": metadata.get("algorithms", {}).get("delay", "registered model")},
         "expected_range": expected_range,
         "completion_probabilities": _completion_probabilities(target, X, planned),
@@ -148,3 +290,10 @@ def project_forecast(code: str, *, include_explanations: bool = True) -> dict:
 
 def project_prediction(code: str, override: dict | None = None, include_explanations: bool = True) -> dict:
     return project_forecast(code, include_explanations=include_explanations)
+
+
+def clear_prediction_caches() -> None:
+    """Explicit invalidation hook for model activation/retraining operations."""
+    _active_model_bundle.cache_clear()
+    _live_reference.cache_clear()
+    _live_explanations.cache_clear()

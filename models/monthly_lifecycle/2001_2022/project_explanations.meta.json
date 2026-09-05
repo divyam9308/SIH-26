@@ -1,0 +1,10 @@
+{
+  "artifact_schema_version": 1,
+  "artifact_sha256": "e1016834b4a0b6c4947565ca1f689c308632e767609fd27985b8e6e95fc2537a",
+  "cache_identity": "8d82bad91e384f1a7d098efe5fc2c7e8c13d10f30a84f56778eaff13c364ebcc",
+  "fully_explained": 489,
+  "method": "deterministic_two_path_wrapper_contributions_v1",
+  "published_at": "2026-09-05T12:15:42.754349+00:00",
+  "record_count": 489,
+  "window": "2001_2022"
+}

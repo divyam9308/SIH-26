@@ -13,7 +13,14 @@ from backend.app.ml.real_time_windows import active_version
 def registry() -> dict[str, Any]: return json.loads((MODELS_DIR / "registry.json").read_text())
 @lru_cache(maxsize=1)
 def metrics() -> dict[str, Any]: return json.loads((MODELS_DIR / "model_metrics.json").read_text())
-def global_importances() -> dict[str, Any]:
+def global_importances(version: str | None = None) -> dict[str, Any]:
+    selected = version.strip().replace("monthly-", "").replace("-", "_") if version else active_version()
+    lifecycle_path = MODELS_DIR / "monthly_lifecycle" / selected / "shap_importance.json" if selected else None
+    if lifecycle_path and lifecycle_path.exists():
+        values = json.loads(lifecycle_path.read_text())
+        return {"model_version": f"monthly-{selected.replace('_', '-')}", **{f"{name}_model": values.get(name, {}).get("features", []) for name in ("cost", "delay", "risk")}}
+    if version:
+        raise FileNotFoundError(f"Feature importance for requested model version {version} was not found.")
     version = active_version()
     if version:
         shap_dir = MODELS_DIR / version / "shap"

@@ -76,18 +76,34 @@ def test_year_range_retrain_calls_promoted_production_trainer(tmp_path, monkeypa
     monkeypatch.setattr(retraining, "_training_data", lambda: (data, identity, 2001, 2024))
     called = {}
 
-    def fake_train_window(start, end, test_end, data=None, identity=None, artifact_root=None):
-        called.update({"start": start, "end": end, "test_end": test_end, "data": data, "identity": identity, "artifact_root": artifact_root})
+    def fake_train_window(
+        start, end, test_end, data=None, identity=None, artifact_root=None,
+        verify_frozen_reference=True,
+    ):
+        called.update({
+            "start": start,
+            "end": end,
+            "test_end": test_end,
+            "data": data,
+            "identity": identity,
+            "artifact_root": artifact_root,
+            "verify_frozen_reference": verify_frozen_reference,
+        })
         _write_fake_artifacts(artifact_root, start, end)
         return _comparison_result()
 
     monkeypatch.setattr(retraining, "train_window_with_promoted_cost_and_delay", fake_train_window)
+    # This unit test verifies staging/call routing with intentionally skeletal
+    # artifacts; report-content validation is covered by the canonical bundle
+    # integration tests and must not require a real retrain here.
+    monkeypatch.setattr(retraining, "_write_evaluation_reports", lambda *_args: {})
     result = retraining.retrain_lifecycle(2001, 2015)
 
     assert called["start"] == 2001
     assert called["end"] == 2015
     assert called["test_end"] == 2024
     assert called["data"] is data
+    assert called["verify_frozen_reference"] is False
     assert str(called["artifact_root"]).startswith(str(isolated_root / ".staging"))
     assert result["model_family"] == "monthly_lifecycle"
     assert result["production_cost_baseline"] == "exp12_trajectory_v3_cost_only"
@@ -101,6 +117,16 @@ def test_year_range_retrain_calls_promoted_production_trainer(tmp_path, monkeypa
     assert result["run_id"] == "unit-test-run"
     assert (isolated_root / "2001_2015" / "run_manifest.json").exists()
     assert not (isolated_root / "2001_2015" / ".training").exists()
+
+
+def test_model_simulation_and_models_route_share_current_production_entrypoint():
+    from backend.app.routes import models
+
+    assert simulation.retrain_lifecycle is retraining.retrain_lifecycle
+    assert models.retrain_lifecycle is retraining.retrain_lifecycle
+    assert retraining.train_window_with_promoted_cost_and_delay.__module__.endswith(
+        "production_exp105_exp113_baseline"
+    )
 
 
 def test_failed_retrain_always_removes_training_marker(tmp_path, monkeypatch):
