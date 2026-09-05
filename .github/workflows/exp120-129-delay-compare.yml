@@ -18,11 +18,10 @@ jobs:
     timeout-minutes: 360
     env:
       # Keep the exact six strict-forward production folds and the exact
-      # canonical model/evaluation contract. Two outer cutoff fits still run
-      # concurrently; each canonical fit may use up to three independent
-      # internal OOF workers. This is orchestration-only and is intended to
-      # avoid the six-hour hosted-runner timeout seen with the 2x2 layout.
-      POST_EXP113_OOF_WORKERS: '2'
+      # canonical model/evaluation contract. Use all four supported outer
+      # production-OOF workers so the six folds finish within the hosted
+      # runner's hard six-hour limit; model threads remain pinned to one.
+      POST_EXP113_OOF_WORKERS: '4'
       POST_EXP113_THREADS_PER_WORKER: '1'
       SIH_FOLD_JOBS: '3'
       SIH_MODEL_THREADS: '1'
