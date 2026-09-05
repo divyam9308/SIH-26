@@ -28,6 +28,7 @@ from backend.app.ml.production_cost_baseline import enrich_history_for_productio
 from backend.app.ml.production_delay_baseline import enrich_history_for_delay_production
 
 logger = logging.getLogger(__name__)
+FROZEN_ROUTING_GATE = 'exp35_calibration_cohort_eligible'
 
 
 @lru_cache(maxsize=128)
@@ -223,21 +224,48 @@ def _reconstruct(window: str, code: str, snapshot_date: str, identity: str) -> d
     contract = target_feature_contract(bundle["metadata"])
     expected = {"cost": float(ledger.predicted_cost_overrun), "delay": float(ledger.predicted_delay_days), "risk": str(ledger.predicted_risk)}
     result: dict[str, Any] = {}
-    inputs = {}
-    reproduced = {}
+    inputs: dict[str, list[str]] = {}
+    missing: set[str] = set()
     for target in ("cost", "delay", "risk"):
         model = bundle[target]
         features = list(getattr(model, "features", contract[target]))
-        if not features or any(feature not in source.index for feature in features):
+        if not features:
             raise ValueError(f'Frozen {target} feature schema is incomplete.')
+        missing.update(feature for feature in features if feature not in source.index)
         inputs[target] = features
-        prediction = model.predict(source.to_frame().T.reindex(columns=features))[0]
-        if target == "risk":
-            if str(prediction) != expected[target]:
-                raise ValueError(f"Frozen {target} prediction mismatch: {prediction!r} != {expected[target]!r}")
-        elif not np.isclose(float(prediction), expected[target], rtol=1e-6, atol=1e-4):
-            raise ValueError(f"Frozen {target} prediction mismatch: {float(prediction):.6f} != {expected[target]:.6f}")
-        reproduced[target] = str(prediction) if target == 'risk' else float(prediction)
+    if missing.difference({FROZEN_ROUTING_GATE}):
+        raise ValueError(f'Frozen feature schema is incomplete: {", ".join(sorted(missing))}.')
+
+    # The Exp35 gate is a frozen audit-routing input, not a source-data field.
+    # Its selected cohort IDs were not persisted in the raw trajectory.  Test
+    # both possible states, and retain one only if Cost, Delay, and Risk all
+    # exactly reproduce their frozen ledger outputs.  This is a verifier, not
+    # a fallback to a current model or a guessed explanation value.
+    candidates = [source]
+    if FROZEN_ROUTING_GATE in missing:
+        candidates = []
+        for gate in (False, True):
+            candidate = source.copy()
+            candidate[FROZEN_ROUTING_GATE] = gate
+            candidates.append(candidate)
+
+    reproduced: dict[str, Any] | None = None
+    selected_source: pd.Series | None = None
+    for candidate in candidates:
+        attempt: dict[str, Any] = {}
+        for target in ("cost", "delay", "risk"):
+            prediction = bundle[target].predict(candidate.to_frame().T.reindex(columns=inputs[target]))[0]
+            attempt[target] = str(prediction) if target == 'risk' else float(prediction)
+        if (
+            np.isclose(attempt['cost'], expected['cost'], rtol=1e-6, atol=1e-4)
+            and np.isclose(attempt['delay'], expected['delay'], rtol=1e-6, atol=1e-4)
+            and attempt['risk'] == expected['risk']
+        ):
+            selected_source, reproduced = candidate, attempt
+            break
+    if selected_source is None or reproduced is None:
+        raise ValueError('Frozen Cost, Delay, and Risk predictions did not reproduce for either frozen routing state.')
+    source = selected_source
     # All three guards must pass before any explanation is computed.
     for target in ('cost', 'delay', 'risk'):
         model, features = bundle[target], inputs[target]
