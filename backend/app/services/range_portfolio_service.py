@@ -28,7 +28,7 @@ RANGE_WINDOWS = {"2001_2017": (2001, 2017, 2018), "2001_2021": (2001, 2021, 2022
 CANONICAL_LIFECYCLE_ONLY_WINDOWS = frozenset({"2001_2022"})
 # Decomposition presentation is intentionally rolling out only to this audited
 # holdout. Other windows retain their existing factor/status contract.
-DECOMPOSITION_SUMMARY_WINDOWS = frozenset({"2001_2021"})
+DECOMPOSITION_SUMMARY_WINDOWS = frozenset({"2001_2021", "2001_2022"})
 
 
 def supported_windows() -> list[dict]:
