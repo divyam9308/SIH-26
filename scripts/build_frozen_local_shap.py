@@ -54,18 +54,25 @@ if args.limit is not None:
 
 report = {"window": args.window, "total": int(len(rows)), "verified": 0,
           "mismatch": 0, "missing_source": 0, "error": 0, "projects": []}
-for row in rows.itertuples(index=False):
+print(
+    f"Warming verified local-SHAP cache: window={args.window}, projects={report['total']}",
+    flush=True,
+)
+for number, row in enumerate(rows.itertuples(index=False), start=1):
     code = str(row.canonical_project_id)
     snapshot = pd.Timestamp(row.snapshot_date).strftime("%Y-%m-%d")
+    print(f"[{number}/{report['total']}] {code} @ {snapshot}: reconstructing...", flush=True)
     try:
         entry = build_local_explanation(args.window, code, snapshot)
         report["verified"] += 1
         report["projects"].append({"project_code": code, "snapshot_date": snapshot, "status": "verified",
                                    "cache_identity": entry["cache_identity"]})
+        print(f"[{number}/{report['total']}] {code}: verified", flush=True)
     except Exception as exc:
         reason = str(exc)
         bucket = failure_bucket(reason)
         report[bucket] += 1
         report["projects"].append({"project_code": code, "snapshot_date": snapshot, "status": bucket, "reason": reason})
+        print(f"[{number}/{report['total']}] {code}: {bucket} — {reason}", flush=True)
 
 print(json.dumps(report, indent=2, allow_nan=False))
