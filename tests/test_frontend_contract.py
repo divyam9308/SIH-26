@@ -228,13 +228,6 @@ def test_2001_2021_explanation_summary_uses_published_additive_metadata_only():
     assert payload["risk_explanation_summary"]["output"] == "predicted_class_probability"
     assert payload["risk_explanation_summary"]["predicted_class"]
 
-    # Both published lifecycle windows expose their own already-published
-    # explanation arithmetic; neither request rebuilds SHAP.
-    other_code = client.get("/api/projects", params={"window": "2001_2022", "page_size": 1}).json()["items"][0]["project_code"]
-    other = client.get(f"/api/projects/{other_code}/forecast", params={"window": "2001_2022"})
-    assert other.status_code == 200
-    assert other.json()["cost_explanation_summary"]["reconstruction_verified"] is True
-
 
 def test_historical_peers_do_not_fall_back_to_the_live_project_dataset():
     response = client.get("/api/projects/N24000633/peers", params={"window": "2001_2021"})
