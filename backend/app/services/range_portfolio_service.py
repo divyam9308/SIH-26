@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 from backend.app.ml.provenance import file_sha256
-from backend.app.services.frozen_explanation_service import local_explanation
+from backend.app.services.frozen_explanation_service import verified_explanation
 from backend.app.services.operational_driver_service import operational_drivers
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -241,20 +241,19 @@ def historical_project(code: str, window: str) -> dict:
     item = max(matches, key=lambda row: row["snapshot_date"])
     record = {"snapshot_date": item["snapshot_date"], "sector": item["sector"], "ministry": item["ministry"], "implementing_agency": item["implementing_agency"], "project_code": item["project_code"], "project_name": item["project_name"], "original_cost_cr": item["original_cost_cr"], "revised_cost_cr": item["revised_cost_cr"], "expenditure_cr": item["expenditure_cr"], "original_end_date": None, "revised_end_date": None, "physical_progress_pct": item["physical_progress_pct"], "source_url": "", "days_to_original_deadline": 0, "schedule_extension_days": item["actual_delay_days"], "cost_escalation_pct": item["actual_cost_overrun_percentage"], "expenditure_to_original_pct": None, "financial_progress_pct": item.get("financial_progress_pct"), "schedule_overrun_90d": None, "cost_overrun_5pct": None, "dq_expenditure_gt_revised": 0, "dq_revised_date_before_original": 0, "dq_missing_revised_cost": int(item["revised_cost_cr"] is None), "dq_missing_revised_date": 1, "dq_missing_progress": int(item["physical_progress_pct"] is None)}
     best_models = item["best_models"]
-    explanation_status = {
-        "available": False,
-        "reason": "Project-level SHAP was not persisted for this frozen evaluation run.",
-        "source": "frozen_evaluation_ledger",
-    }
-    stored_explanation = local_explanation(window, item["project_code"], item["snapshot_date"])
+    # This is deliberately an on-demand lookup rather than a live-model
+    # fallback.  ``verified_explanation`` either returns a cached entry whose
+    # identity matches this frozen bundle, or first proves all three frozen
+    # predictions can be reproduced before it writes a new entry.
+    stored_explanation, available_status = verified_explanation(
+        window, item["project_code"], item["snapshot_date"]
+    )
     if stored_explanation:
         def stored(target: str):
             return stored_explanation["models"][target]["factors"]
-        available_status = {"available": True, "reason": None, "source": "verified_frozen_local_shap_ledger"}
         cost_factors, delay_factors, risk_factors = stored("cost"), stored("delay"), stored("risk")
     else:
         cost_factors = delay_factors = risk_factors = []
-        available_status = explanation_status
     target = pd.to_datetime(item["snapshot_date"], errors="coerce")
     history = _trajectory_history()
     history = history[(history["canonical_project_id"].eq(str(code))) & (history["snapshot_date"].le(target))]

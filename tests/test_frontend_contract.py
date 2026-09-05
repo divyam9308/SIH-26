@@ -135,20 +135,24 @@ def test_historical_project_detail_honours_selected_window():
     assert forecast.json()["model_version"] == item["model_version"]
 
 
-def test_historical_detail_capabilities_use_only_the_selected_frozen_window():
+def test_historical_detail_capabilities_use_only_the_selected_frozen_window(monkeypatch):
     code = "N24000633"
     window = "2001_2021"
+    unavailable = {
+        "available": False,
+        "reason": "Frozen explanation unavailable: frozen reproduction mismatch",
+        "source": "frozen_evaluation_ledger",
+    }
+    # Keep this window-selection contract test focused: reconstruction itself
+    # is covered separately and must never fall back to the live model.
+    monkeypatch.setattr(range_portfolio_service, "verified_explanation", lambda *_args: (None, unavailable))
     record = client.get(f"/api/projects/{code}", params={"window": window})
     forecast = client.get(f"/api/projects/{code}/forecast", params={"window": window})
     peers = client.get(f"/api/projects/{code}/peers", params={"window": window})
     warnings = client.get(f"/api/projects/{code}/warnings", params={"window": window})
     assert record.status_code == forecast.status_code == peers.status_code == warnings.status_code == 200
     assert record.json()["snapshot_date"] == forecast.json()["dataset_snapshot_date"]
-    assert forecast.json()["cost_explanation_status"] == {
-        "available": False,
-        "reason": "Project-level SHAP was not persisted for this frozen evaluation run.",
-        "source": "frozen_evaluation_ledger",
-    }
+    assert forecast.json()["cost_explanation_status"] == unavailable
     assert peers.json()["peer_count"] > 0
     assert warnings.json()["source"] == "official_snapshot_trajectory"
 
