@@ -8,7 +8,7 @@ on:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     steps:
       - name: Checkout candidate branch
         uses: actions/checkout@v4
