@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowLeft, Clock, IndianRupee, Radar, TrendingUp } from 
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../services/api';
 import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers, getProjectWarnings } from '../services/projectService';
-import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, WarningResponse } from '../types/api';
+import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, ExplanationSummary, WarningResponse } from '../types/api';
 import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects';
 import { shapExplanationSubject, shapFeatureLabel } from '../lib/shapFeatureLabels';
 import '../styles/projects.css';
@@ -29,7 +29,17 @@ function FactorList({ title, factors, status, tone, target = 'cost', risk }: { t
   if (!factors || !isUsableFactors(factors)) return <section className="risk-why-section"><h3>{title}</h3><p className="section-unavailable">{status?.reason ?? 'SHAP explanation unavailable for this model response.'}</p></section>;
   const sorted = [...factors].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
   const maximum = Math.max(...sorted.map((factor) => Math.abs(factor.impact)), 0.0001);
-  return <section className="risk-why-section"><h3>{title}</h3><ol className="factor-list">{sorted.map((factor, index) => <li key={`${factor.feature}-${index}`}><div className="factor-top"><span><b className="factor-index">{String(index + 1).padStart(2, '0')}</b> {featureLabel(factor.feature)}</span><span className="factor-weight">{factor.impact > 0 ? '+' : ''}{factor.impact.toFixed(4)}</span></div><div className="factor-track"><span className={`tone-${tone}`} style={{ width: `${Math.abs(factor.impact) / maximum * 100}%` }} /></div><p>{factorSentence(factor, target, risk)}</p></li>)}</ol></section>;
+  return <section className="risk-why-section"><h3>{title}</h3><div className="factor-axis" aria-label="Contribution direction: reductions left of zero, increases right of zero"><span>Reduces prediction</span><b>0</b><span>Increases prediction</span></div><ol className="factor-list">{sorted.map((factor, index) => { const width = Math.abs(factor.impact) / maximum * 50; const left = factor.impact < 0 ? 50 - width : 50; return <li key={`${factor.feature}-${index}`}><div className="factor-top"><span><b className="factor-index">{String(index + 1).padStart(2, '0')}</b> {featureLabel(factor.feature)}</span><span className="factor-weight">{factor.impact > 0 ? '+' : ''}{factor.impact.toFixed(4)}</span></div><div className="factor-track factor-track-centered"><i /><span className={`tone-${tone} ${factor.impact < 0 ? 'factor-bar-negative' : 'factor-bar-positive'}`} style={{ width: `${width}%`, left: `${left}%` }} /></div><p>{factorSentence(factor, target, risk)}</p></li>; })}</ol></section>;
+}
+
+const outputLabel = (summary: ExplanationSummary, target: 'cost' | 'delay' | 'risk') => summary.output === 'predicted_class_probability' ? `Predicted ${summary.predicted_class ?? 'selected'}-class probability` : target === 'cost' ? 'Predicted cost overrun' : 'Predicted delay';
+
+function PredictionDecomposition({ summary, target }: { summary?: ExplanationSummary | null; target: 'cost' | 'delay' | 'risk' }) {
+  if (!summary?.available || summary.base_value === null || summary.prediction === null || summary.net_feature_impact === null) return null;
+  const precision = target === 'risk' ? 4 : 2;
+  const number = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(precision)}`;
+  const riskNote = summary.output === 'predicted_class_probability' ? ' This is the frozen classifier output, separate from the headline calibrated delay-severity policy.' : '';
+  return <section className="prediction-decomposition" aria-label="Prediction decomposition"><div><span>Historical reference</span><b>{summary.base_value.toFixed(precision)}</b></div><div><span>Net project-specific impact</span><b>{number(summary.net_feature_impact)}</b></div><div><span>{outputLabel(summary, target)}</span><b>{summary.prediction.toFixed(precision)}</b></div>{Math.abs(summary.other_features_impact ?? 0) > 0.000001 && <p>Top displayed factors contribute {number(summary.displayed_factors_impact ?? 0)}; other model features contribute {number(summary.other_features_impact ?? 0)}.</p>}<details><summary>How calculated?</summary><p>{summary.reference_description} The baseline is a local model reference, not an approved cost or final outcome. Factor impacts add to the net project-specific impact; {outputLabel(summary, target).toLowerCase()} = baseline + net impact.{riskNote}</p></details></section>;
 }
 
 export function ProjectDetail() {
@@ -101,9 +111,9 @@ export function ProjectDetail() {
   const financialProgress = project.financial_progress_pct;
 
   const shapConfig = {
-    cost: { label: 'Cost', title: 'Cost SHAP factors', factors: forecast?.cost_factors, status: forecast?.cost_explanation_status },
-    delay: { label: 'Delay', title: 'Delay SHAP factors', factors: forecast?.delay_factors, status: forecast?.delay_explanation_status },
-    risk: { label: 'Risk', title: 'Risk SHAP factors', factors: forecast?.risk_factors, status: forecast?.risk_explanation_status },
+    cost: { label: 'Cost', title: 'Cost SHAP factors', factors: forecast?.cost_factors, status: forecast?.cost_explanation_status, summary: forecast?.cost_explanation_summary },
+    delay: { label: 'Delay', title: 'Delay SHAP factors', factors: forecast?.delay_factors, status: forecast?.delay_explanation_status, summary: forecast?.delay_explanation_summary },
+    risk: { label: 'Risk', title: 'Risk SHAP factors', factors: forecast?.risk_factors, status: forecast?.risk_explanation_status, summary: forecast?.risk_explanation_summary },
   }[shapTab];
 
   return <div className="projects-page project-detail">
@@ -119,7 +129,7 @@ export function ProjectDetail() {
 
     <ProjectPanel className="evidence-panel" title="Model Evidence" subtitle="Model Evidence · Local SHAP — project-level inputs that pushed each prediction higher or lower.">
       <div className="evidence-tabs" role="tablist">{(['cost', 'delay', 'risk'] as const).map((tab) => <button key={tab} role="tab" aria-selected={shapTab === tab} className={shapTab === tab ? 'active' : ''} onClick={() => setShapTab(tab)}>{shapConfig && tab === shapTab ? shapConfig.label : tab[0].toUpperCase() + tab.slice(1)}</button>)}</div>
-      <div className="evidence-body"><FactorList title={shapConfig.title} factors={shapConfig.factors} status={shapConfig.status} tone={tone} target={shapTab} risk={category} /></div>
+      <div className="evidence-body"><PredictionDecomposition summary={shapConfig.summary} target={shapTab} /><FactorList title={shapConfig.title} factors={shapConfig.factors} status={shapConfig.status} tone={tone} target={shapTab} risk={shapTab === 'risk' ? shapConfig.summary?.predicted_class ?? category : category} /></div>
     </ProjectPanel>
 
     <ProjectPanel className="operational-panel" title="Operational Drivers" subtitle="Observed warning signals derived directly from available PAIMANA project records.">

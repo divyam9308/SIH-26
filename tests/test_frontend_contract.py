@@ -214,6 +214,27 @@ def test_historical_detail_capabilities_use_only_the_selected_frozen_window(monk
     assert warnings.json()["source"] == "official_snapshot_trajectory"
 
 
+def test_2001_2021_explanation_summary_uses_published_additive_metadata_only():
+    forecast = client.get("/api/projects/N24000633/forecast", params={"window": "2001_2021"})
+    assert forecast.status_code == 200
+    payload = forecast.json()
+    for target in ("cost", "delay", "risk"):
+        summary = payload[f"{target}_explanation_summary"]
+        assert summary["available"] is True
+        assert summary["reconstruction_verified"] is True
+        assert summary["prediction"] == pytest.approx(summary["base_value"] + summary["net_feature_impact"], abs=1e-6)
+        assert summary["net_feature_impact"] == pytest.approx(summary["displayed_factors_impact"] + summary["other_features_impact"], abs=1e-6)
+        assert "future outcomes are excluded" in summary["reference_description"]
+    assert payload["risk_explanation_summary"]["output"] == "predicted_class_probability"
+    assert payload["risk_explanation_summary"]["predicted_class"]
+
+    # The rollout is intentionally limited to the requested frozen window.
+    other_code = client.get("/api/projects", params={"window": "2001_2022", "page_size": 1}).json()["items"][0]["project_code"]
+    other = client.get(f"/api/projects/{other_code}/forecast", params={"window": "2001_2022"})
+    assert other.status_code == 200
+    assert "cost_explanation_summary" not in other.json()
+
+
 def test_historical_peers_do_not_fall_back_to_the_live_project_dataset():
     response = client.get("/api/projects/N24000633/peers", params={"window": "2001_2021"})
     assert response.status_code == 200

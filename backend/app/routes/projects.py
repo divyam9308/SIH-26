@@ -50,7 +50,7 @@ def project(code: str, window: str | None = None):
     except KeyError:
         raise HTTPException(404, "Project not found")
 
-@router.get("/{code}/prediction", response_model=ForecastResponse)
+@router.get("/{code}/prediction", response_model=ForecastResponse, response_model_exclude_unset=True)
 def prediction(code: str, window: str | None = None):
     if window:
         if window not in RANGE_WINDOWS:
@@ -67,7 +67,7 @@ def prediction(code: str, window: str | None = None):
         raise HTTPException(404, "Project not found")
     except ValueError as exc:
         raise HTTPException(409, str(exc))
-@router.get("/{code}/forecast", response_model=ForecastResponse)
+@router.get("/{code}/forecast", response_model=ForecastResponse, response_model_exclude_unset=True)
 def forecast(code: str, window: str | None = None):
     if window:
         if window not in RANGE_WINDOWS:

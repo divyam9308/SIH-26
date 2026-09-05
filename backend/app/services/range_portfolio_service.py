@@ -26,6 +26,9 @@ RANGE_WINDOWS = {"2001_2017": (2001, 2017, 2018), "2001_2021": (2001, 2021, 2022
 # historical completed-project CatBoost artifact and is not scientifically
 # comparable with the current production lifecycle stack.
 CANONICAL_LIFECYCLE_ONLY_WINDOWS = frozenset({"2001_2022"})
+# Decomposition presentation is intentionally rolling out only to this audited
+# holdout. Other windows retain their existing factor/status contract.
+DECOMPOSITION_SUMMARY_WINDOWS = frozenset({"2001_2021"})
 
 
 def supported_windows() -> list[dict]:
@@ -34,6 +37,38 @@ def supported_windows() -> list[dict]:
 
 def _safe(value, digits=2):
     return None if pd.isna(value) else round(float(value), digits)
+
+
+def _explanation_summary(explanation: dict, target: str) -> dict | None:
+    """Expose published arithmetic without recomputing a model explanation."""
+    value = explanation.get(target, {})
+    if not value.get("available"):
+        return None
+    base, prediction = value.get("base_value"), value.get("prediction")
+    if not isinstance(base, (int, float)) or not isinstance(prediction, (int, float)):
+        return None
+    factors = value.get("factors", [])
+    all_factors = value.get("all_factors", [])
+    displayed = sum(float(factor.get("impact", 0.0)) for factor in factors)
+    net = float(prediction) - float(base)
+    # The returned factor list is deliberately top-five. The explicit residual
+    # prevents that list from being presented as the entire decomposition.
+    other = 0.0 if len(all_factors) <= len(factors) else net - displayed
+    reproduction = explanation.get("reproduction", {})
+    return {
+        "available": True,
+        "base_value": round(float(base), 6),
+        "prediction": round(float(prediction), 6),
+        "net_feature_impact": round(net, 6),
+        "displayed_factors_impact": round(displayed, 6),
+        "other_features_impact": round(other, 6),
+        "output": value.get("output"),
+        "predicted_class": value.get("predicted_class"),
+        "factor_count": len(all_factors),
+        "source": value.get("source"),
+        "reconstruction_verified": reproduction.get("passed") is True,
+        "reference_description": "A deterministic prior official snapshot from this project's historical trajectory is the local reference; the selected snapshot bounds the data and future outcomes are excluded.",
+    }
 
 
 def _paths(window: str):
@@ -249,6 +284,12 @@ def _payload(window: str, signature: str) -> dict:
                     "method": explanation.get("method"),
                 },
             })
+            if window in DECOMPOSITION_SUMMARY_WINDOWS:
+                item.update({
+                    "cost_explanation_summary": _explanation_summary(explanation, "cost"),
+                    "delay_explanation_summary": _explanation_summary(explanation, "delay"),
+                    "risk_explanation_summary": _explanation_summary(explanation, "risk"),
+                })
         else:
             item.update({
                 "cost_factors": [], "delay_factors": [], "risk_factors": [],
@@ -296,6 +337,8 @@ def historical_project(code: str, window: str) -> dict:
     delay_factors = item.get("delay_factors", [])
     risk_factors = item.get("risk_factors", [])
     forecast = {"project_id": item["project_code"], "project_name": item["project_name"], "model_version": item["model_version"], "dataset_snapshot_date": item["snapshot_date"], "inference_timestamp": item["inference_timestamp"], "current_status": {"snapshot_month": item["snapshot_date"], "physical_progress_percentage": item["physical_progress_pct"], "current_estimated_cost": item["revised_cost_cr"], "expenditure_cr": item["expenditure_cr"], "planned_completion_date": None, "progress_delay_percentage_points": None}, "predicted_cost_overrun_percentage": item["predicted_cost_overrun_percentage"], "predicted_cost_overrun_amount_cr": item["predicted_cost_overrun_amount_cr"], "predicted_final_cost_cr": item["predicted_final_cost_cr"], "predicted_delay_days": item["predicted_delay_days"], "predicted_cost_overrun": item["predicted_cost_overrun_percentage"], "predicted_completion_date": None, "current_progress": item["physical_progress_pct"], "predicted_delay_months": item["predicted_delay_months"], "risk_score": item["risk_score"], "risk_probability_percentage": None, "risk_level": item["risk_level"], "model_confidence_percentage": None, "confidence_calibration_status": item["confidence_calibration_status"], "explanation": cost_factors, "shap_explanation": cost_factors, "cost_factors": cost_factors, "delay_factors": delay_factors, "risk_factors": risk_factors, "cost_explanation_status": item.get("cost_explanation_status", unavailable_status), "delay_explanation_status": item.get("delay_explanation_status", unavailable_status), "risk_explanation_status": item.get("risk_explanation_status", unavailable_status), "operational_drivers": item.get("operational_drivers", []), "explanation_provenance": item.get("explanation_provenance"), "best_models": {"cost": best_models.get("cost_regressor") or best_models.get("cost") or item["model_version"], "delay": best_models.get("schedule_regressor") or best_models.get("delay") or item["model_version"]}, "expected_range": None, "completion_probabilities": [], "features_used": [], "model_scope": item["model_scope"]}
+    if window in DECOMPOSITION_SUMMARY_WINDOWS:
+        forecast.update({key: item.get(key) for key in ("cost_explanation_summary", "delay_explanation_summary", "risk_explanation_summary")})
     return {"record": record, "forecast": forecast}
 
 

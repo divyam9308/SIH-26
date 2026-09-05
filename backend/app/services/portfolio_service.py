@@ -209,7 +209,8 @@ def project_page(*, page: int, page_size: int, search: str | None, sector: str |
     detail_only = {
         "cost_factors", "delay_factors", "risk_factors", "cost_explanation_status",
         "delay_explanation_status", "risk_explanation_status", "operational_drivers",
-        "explanation_provenance",
+        "explanation_provenance", "cost_explanation_summary", "delay_explanation_summary",
+        "risk_explanation_summary",
     }
     page_rows = [{key: value for key, value in row.items() if key not in detail_only} for row in rows[start:start + page_size]]
     levels = {key: 0 for key in ("critical", "high", "medium", "low")}

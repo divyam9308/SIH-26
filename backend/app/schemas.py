@@ -75,6 +75,22 @@ class ExplanationProvenance(ContractModel):
     method: str
 
 
+class ExplanationSummary(ContractModel):
+    """Published decomposition metadata for a frozen local explanation."""
+    available: bool
+    base_value: float | None = None
+    prediction: float | None = None
+    net_feature_impact: float | None = None
+    displayed_factors_impact: float | None = None
+    other_features_impact: float | None = None
+    output: str | None = None
+    predicted_class: str | None = None
+    factor_count: int | None = None
+    source: str | None = None
+    reconstruction_verified: bool | None = None
+    reference_description: str | None = None
+
+
 class OperationalDriver(ContractModel):
     type: str
     label: str
@@ -133,6 +149,9 @@ class ForecastResponse(ContractModel):
     cost_explanation_status: CapabilityStatus
     delay_explanation_status: CapabilityStatus
     risk_explanation_status: CapabilityStatus
+    cost_explanation_summary: ExplanationSummary | None = None
+    delay_explanation_summary: ExplanationSummary | None = None
+    risk_explanation_summary: ExplanationSummary | None = None
     operational_drivers: list[OperationalDriver]
     explanation_provenance: ExplanationProvenance | None = None
     best_models: BestModels

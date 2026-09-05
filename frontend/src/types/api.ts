@@ -15,6 +15,7 @@ export interface ProjectRecord {
 export interface ShapFactor { feature: string; impact: number; direction: string }
 export interface CapabilityStatus { available: boolean; reason: string | null; source: string | null }
 export interface ExplanationProvenance { run_id: string | null; dataset_fingerprint: string | null; cache_identity: string; method: string }
+export interface ExplanationSummary { available: boolean; base_value: number | null; prediction: number | null; net_feature_impact: number | null; displayed_factors_impact: number | null; other_features_impact: number | null; output: string | null; predicted_class: string | null; factor_count: number | null; source: string | null; reconstruction_verified: boolean | null; reference_description: string | null }
 export interface OperationalDriver { type: string; label: string; category: 'COST' | 'DELAY' | 'BOTH' | 'IMPLEMENTATION'; evidence: string; provenance: 'direct' | 'derived'; source: string }
 export interface ForecastResponse {
   project_id: string; project_name: string; model_version: string; dataset_snapshot_date: string; inference_timestamp: string;
@@ -26,6 +27,7 @@ export interface ForecastResponse {
   confidence_calibration_status: string; explanation: ShapFactor[]; shap_explanation: ShapFactor[];
   cost_factors: ShapFactor[]; delay_factors: ShapFactor[]; risk_factors: ShapFactor[];
   cost_explanation_status: CapabilityStatus; delay_explanation_status: CapabilityStatus; risk_explanation_status: CapabilityStatus;
+  cost_explanation_summary?: ExplanationSummary | null; delay_explanation_summary?: ExplanationSummary | null; risk_explanation_summary?: ExplanationSummary | null;
   operational_drivers: OperationalDriver[];
   explanation_provenance?: ExplanationProvenance | null;
   best_models: { cost: string; delay: string };
