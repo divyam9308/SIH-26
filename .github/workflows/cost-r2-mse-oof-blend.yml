@@ -1,0 +1,45 @@
+name: Cost R2 MSE OOF blend experiment
+
+on:
+  push:
+    branches:
+      - experiment/cost-r2-mse-oof-blend
+  workflow_dispatch:
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      COST_R2_OOF_WORKERS: '2'
+      COST_R2_THREADS_PER_WORKER: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile
+        run: python -m compileall backend scripts tests
+      - name: Focused tests
+        run: pytest -q tests/test_cost_r2_mse_oof_blend.py
+      - name: Run frozen Cost R2 experiment
+        run: python scripts/run_cost_r2_mse_oof_blend.py
+      - name: Show result
+        if: always()
+        run: |
+          if [ -f test-output/cost-r2-mse-oof-blend/experiment_result.json ]; then
+            cat test-output/cost-r2-mse-oof-blend/experiment_result.json
+          fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-r2-mse-oof-blend-result
+          if-no-files-found: error
+          path: |
+            test-output/cost-r2-mse-oof-blend/experiment_result.json
+            test-output/cost-r2-mse-oof-blend/baseline/2001_2021/evaluation_results.json
+            test-output/cost-r2-mse-oof-blend/baseline/2001_2021/prediction_validation.csv
