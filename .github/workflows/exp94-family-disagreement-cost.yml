@@ -1,0 +1,50 @@
+name: Exp94 family disagreement Cost comparison
+
+on:
+  push:
+    branches:
+      - experiment-94-family-disagreement-cost
+  workflow_dispatch:
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        training_end: [2019, 2021]
+    env:
+      EXP94_OOF_WORKERS: '2'
+      EXP94_THREADS_PER_WORKER: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile
+        run: python -m compileall -q backend scripts tests
+      - name: Focused Exp94 tests
+        run: pytest -q tests/test_exp94_family_disagreement_cost.py
+      - name: Run Exp94 comparison
+        run: python scripts/run_exp94_family_disagreement_cost.py --end ${{ matrix.training_end }}
+      - name: Show result
+        if: always()
+        run: |
+          RESULT="test-output/exp94-family-disagreement/2001_${{ matrix.training_end }}/experiment_result.json"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+          fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp94-family-disagreement-2001-${{ matrix.training_end }}
+          if-no-files-found: error
+          path: |
+            test-output/exp94-family-disagreement/2001_${{ matrix.training_end }}/experiment_result.json
+            test-output/exp94-family-disagreement/2001_${{ matrix.training_end }}/baseline/2001_${{ matrix.training_end }}/evaluation_results.json
+            test-output/exp94-family-disagreement/2001_${{ matrix.training_end }}/baseline/2001_${{ matrix.training_end }}/prediction_validation.csv
