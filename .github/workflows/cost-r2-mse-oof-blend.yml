@@ -1,9 +1,6 @@
 name: Cost R2 MSE OOF blend experiment
 
 on:
-  push:
-    branches:
-      - experiment/cost-r2-mse-oof-blend
   workflow_dispatch:
 
 jobs:
