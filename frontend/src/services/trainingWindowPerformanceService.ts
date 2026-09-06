@@ -8,12 +8,14 @@ export type TrainingWindowMetric = {
   cost_r2: number | null;
   delay_r2: number | null;
   sample_count: number;
+  evaluation_period: string;
+  source: string;
 };
 
 export type TrainingWindowPerformance = {
   windows: TrainingWindowMetric[];
   evaluation_period: string;
-  sample_count: number;
+  sample_count: number | null;
   generated_at: string;
   methodology: string;
 };
