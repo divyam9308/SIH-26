@@ -9,16 +9,46 @@ on:
       - '.github/workflows/exp-cost-tail-benefit-gate.yml'
   workflow_dispatch:
 
+env:
+  PYTHONUNBUFFERED: '1'
+  OMP_NUM_THREADS: '2'
+  OPENBLAS_NUM_THREADS: '2'
+  MKL_NUM_THREADS: '2'
+
 jobs:
-  compare:
-    name: full 2001-2021 comparison
+  oof:
+    name: OOF ${{ matrix.year }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      PYTHONUNBUFFERED: '1'
-      OMP_NUM_THREADS: '2'
-      OPENBLAS_NUM_THREADS: '2'
-      MKL_NUM_THREADS: '2'
+    strategy:
+      fail-fast: false
+      matrix:
+        year: [2016, 2017, 2018, 2019, 2020, 2021]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Build exact strict-forward production OOF fold
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: >-
+          python -m backend.app.ml.experiments.exp_cost_tail_benefit_gate
+          --build-oof-year ${{ matrix.year }}
+          --oof-output audit_oof/cost-oof-${{ matrix.year }}.pkl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cost-oof-${{ matrix.year }}
+          path: audit_oof/cost-oof-${{ matrix.year }}.pkl
+          if-no-files-found: error
+
+  compare:
+    name: full 2001-2021 comparison
+    needs: oof
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,10 +58,18 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Focused tests
         run: pytest -q tests/test_exp_cost_tail_benefit_gate.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cost-oof-*
+          path: audit_oof
+          merge-multiple: true
       - name: Full leakage-safe comparison
         env:
           PYTHONPATH: '${{ github.workspace }}'
-        run: python -m backend.app.ml.experiments.exp_cost_tail_benefit_gate --output audit_outputs/exp_cost_tail_benefit_gate.json
+        run: >-
+          python -m backend.app.ml.experiments.exp_cost_tail_benefit_gate
+          --oof-dir audit_oof
+          --output audit_outputs/exp_cost_tail_benefit_gate.json
       - name: Show result
         if: always()
         run: test ! -f audit_outputs/exp_cost_tail_benefit_gate.json || cat audit_outputs/exp_cost_tail_benefit_gate.json
