@@ -5,6 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,6 +23,15 @@ from backend.app.ml.experiments.cost_r2_oof_sharding import (
 OUT = Path("test-output/cost-r2-mse-oof-blend")
 
 
+def _normalize_missing(frame: pd.DataFrame) -> pd.DataFrame:
+    """Convert pandas extension missing markers to numpy NaN for sklearn."""
+    clean = frame.copy()
+    for column in clean.columns:
+        if isinstance(clean[column].dtype, pd.api.extensions.ExtensionDtype):
+            clean[column] = clean[column].astype(object).where(clean[column].notna(), np.nan)
+    return clean
+
+
 def _write_result(result: dict) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / "experiment_result.json"
@@ -28,22 +40,32 @@ def _write_result(result: dict) -> None:
 
 
 def _run_with_precomputed_oof(oof_dir: Path) -> dict:
-    production_oof = load_oof_shards(oof_dir)
-    original = experiment.strict_production_oof
+    production_oof = _normalize_missing(load_oof_shards(oof_dir))
+    original_oof = experiment.strict_production_oof
+    original_prepare = experiment.prepare_context
 
     def precomputed(ctx: dict, max_folds: int = 4):
-        return validate_oof_against_context(
+        validated = validate_oof_against_context(
             production_oof,
             ctx["train"],
             experiment.forward_folds,
             max_folds=max_folds,
         )
+        return _normalize_missing(validated)
+
+    def prepared(baseline_root: Path) -> dict:
+        ctx = original_prepare(baseline_root)
+        ctx["train"] = _normalize_missing(ctx["train"])
+        ctx["cohort"] = _normalize_missing(ctx["cohort"])
+        return ctx
 
     experiment.strict_production_oof = precomputed
+    experiment.prepare_context = prepared
     try:
         return experiment.run_experiment(OUT / "baseline")
     finally:
-        experiment.strict_production_oof = original
+        experiment.strict_production_oof = original_oof
+        experiment.prepare_context = original_prepare
 
 
 def main() -> None:
