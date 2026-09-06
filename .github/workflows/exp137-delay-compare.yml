@@ -1,0 +1,47 @@
+name: Exp137 Delay 2001-2022
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    if: github.head_ref == 'experiment-137-asymmetric-delay-cap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m py_compile backend/app/ml/experiments/exp137_delay_asymmetric_cap.py scripts/run_exp137_delay.py
+      - name: Unit tests
+        run: pytest -q tests/test_exp137_delay_asymmetric_cap.py
+
+  compare:
+    if: github.head_ref == 'experiment-137-asymmetric-delay-cap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      POST_EXP113_OOF_WORKERS: '2'
+      POST_EXP113_THREADS_PER_WORKER: '2'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Evaluate 2001-2022 to 2023-2025
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/run_exp137_delay.py --end 2022 --output audit_outputs/exp137_2001_2022.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp137-2001-2022
+          path: audit_outputs/exp137_2001_2022.json
+          if-no-files-found: warn
