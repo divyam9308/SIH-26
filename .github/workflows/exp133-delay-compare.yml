@@ -1,0 +1,19 @@
+name: Exp133 Delay 2001-2021
+on: {pull_request: {branches: [main]}}
+jobs:
+ compare:
+  if: github.head_ref == 'experiment-133-earned-schedule-delay'
+  runs-on: ubuntu-latest
+  timeout-minutes: 360
+  env: {POST_EXP113_OOF_WORKERS: '2', POST_EXP113_THREADS_PER_WORKER: '2', PYTHONUNBUFFERED: '1'}
+  steps:
+   - uses: actions/checkout@v4
+   - uses: actions/setup-python@v5
+     with: {python-version: '3.12', cache: pip}
+   - run: pip install -r requirements-dev.txt
+   - run: python -m py_compile backend/app/ml/experiments/exp133_earned_schedule_delay.py scripts/run_exp133_delay.py
+   - env: {PYTHONPATH: '${{ github.workspace }}'}
+     run: python scripts/run_exp133_delay.py --end 2021 --output audit_outputs/exp133_2001_2021.json
+   - uses: actions/upload-artifact@v4
+     if: always()
+     with: {name: exp133-2001-2021, path: audit_outputs/exp133_2001_2021.json, if-no-files-found: warn}
