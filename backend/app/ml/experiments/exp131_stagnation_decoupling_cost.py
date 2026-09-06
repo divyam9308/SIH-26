@@ -16,7 +16,7 @@ def _gain(a,b): return (a-b)/a*100 if a else 0.0
 def engineer(frame):
     x=frame.copy();x['snapshot_date']=pd.to_datetime(x['snapshot_date'],errors='coerce');x=x.sort_values(['canonical_project_id','snapshot_date'])
     g=x.groupby('canonical_project_id',sort=False)
-    p=pd.to_numeric(x.get('physical_progress'),errors='coerce');e=pd.to_numeric(x.get('expenditure_ratio'),errors='coerce');sp=pd.to_numeric(x.get('expenditure_cr'),errors='coerce');cost=pd.to_numeric(x.get('approved_cost_cr'),errors='coerce')
+    p=pd.to_numeric(x.get('physical_progress'),errors='coerce');e=pd.to_numeric(x.get('expenditure_ratio'),errors='coerce');sp=pd.to_numeric(x.get('cumulative_expenditure_cr'),errors='coerce');cost=pd.to_numeric(x.get('approved_cost_cr'),errors='coerce')
     pprev=g['physical_progress'].shift(1);d=(p-pd.to_numeric(pprev,errors='coerce')).fillna(0)
     inactive=(d<=0).astype(int);runs=[]
     for _,idx in x.groupby('canonical_project_id',sort=False).groups.items():
@@ -24,7 +24,7 @@ def engineer(frame):
         for i in idx:
             c=c+1 if inactive.loc[i] else 0;runs.append((i,c))
     r=pd.Series(dict(runs));x['stagnation_inactivity_snapshots']=r.reindex(x.index).fillna(0).astype(float)
-    p6=pd.to_numeric(g['physical_progress'].shift(6),errors='coerce');e6=pd.to_numeric(g['expenditure_ratio'].shift(6),errors='coerce');s6=pd.to_numeric(g['expenditure_cr'].shift(6),errors='coerce')
+    p6=pd.to_numeric(g['physical_progress'].shift(6),errors='coerce');e6=pd.to_numeric(g['expenditure_ratio'].shift(6),errors='coerce');s6=pd.to_numeric(g['cumulative_expenditure_cr'].shift(6),errors='coerce')
     dp=(p-p6)/100.0;de=e-e6
     x['trailing_decoupling_velocity_6m']=(de-dp).clip(lower=0).replace([np.inf,-np.inf],np.nan).fillna(0)
     denom=(cost*dp.clip(lower=.001)).clip(lower=.01);x['trailing_cost_burn_intensity_6m']=((sp-s6)/denom).replace([np.inf,-np.inf],np.nan).fillna(0)
