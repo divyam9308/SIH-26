@@ -1,0 +1,48 @@
+name: Exp139 Delay canonical comparisons
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    if: github.head_ref == 'experiment-139-sector-stratified-delay-cap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m py_compile backend/app/ml/experiments/exp139_sector_stratified_delay.py scripts/run_exp139_delay.py
+      - run: pytest tests/test_exp139_sector_stratified_delay.py
+
+  compare:
+    if: github.head_ref == 'experiment-139-sector-stratified-delay-cap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2021, 2022]
+    env:
+      POST_EXP113_OOF_WORKERS: '2'
+      POST_EXP113_THREADS_PER_WORKER: '2'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Run Exp139 canonical comparison
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: python scripts/run_exp139_delay.py --end ${{ matrix.end }} --output audit_outputs/exp139_2001_${{ matrix.end }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp139-2001-${{ matrix.end }}
+          path: audit_outputs/exp139_2001_${{ matrix.end }}.json
+          if-no-files-found: warn

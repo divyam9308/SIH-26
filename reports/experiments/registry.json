@@ -5,7 +5,50 @@
     "experiments_are_never_auto_promoted": true,
     "promotion_requires_explicit_acceptance": true
   },
-  "experiments": [],
+  "experiments": [
+    {
+      "experiment_id": "exp137_delay_asymmetric_cap",
+      "name": "Asymmetric Delay Cap Expansion for Tail Recovery",
+      "scope": "delay",
+      "status": "deprecated",
+      "superseded_by": "exp139_sector_stratified_delay",
+      "reason": "Replaced by sector-stratified asymmetric residual bounds while retaining the same structural lag domain features."
+    },
+    {
+      "experiment_id": "exp139_sector_stratified_delay",
+      "name": "Sector-Stratified Asymmetric Delay Cap Expansion",
+      "scope": "delay",
+      "status": "promoted",
+      "training_windows": [
+        {
+          "training_start": 2001,
+          "training_end": 2021,
+          "test_start": 2022,
+          "test_end": 2025,
+          "reference_baseline_mae_days": 342.35,
+          "reference_experiment_mae_days": 287.82,
+          "reference_experiment_r2": 0.8624
+        },
+        {
+          "training_start": 2001,
+          "training_end": 2022,
+          "test_start": 2023,
+          "test_end": 2025,
+          "reference_baseline_mae_days": 294.287,
+          "reference_experiment_mae_days": 247.112,
+          "reference_experiment_r2": 0.8757
+        }
+      ],
+      "reference_stage_r2": {
+        "early": 0.4474,
+        "mid": 0.6156,
+        "late": 0.5933,
+        "very_late": 0.8395
+      },
+      "holdout_used_for_selection": false,
+      "note": "Promotion status recorded per explicit acceptance request; PR workflow independently re-runs canonical windows before merge."
+    }
+  ],
   "legacy_history_source": "reports/experiments/model_evolution.json",
   "note": "This registry is the canonical decision log for lifecycle experiments going forward. Individual experiment PRs add their own immutable evidence entries."
 }
