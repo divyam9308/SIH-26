@@ -1,18 +1,94 @@
 name: Exp132 Cost 2001-2021
-on: {pull_request: {branches: [main]}}
+
+on:
+  pull_request:
+    branches: [main]
+
 jobs:
- compare:
-  if: github.head_ref == 'experiment-132-scale-regime-cost'
-  runs-on: ubuntu-latest
-  timeout-minutes: 360
-  steps:
-   - uses: actions/checkout@v4
-   - uses: actions/setup-python@v5
-     with: {python-version: '3.12', cache: pip}
-   - run: pip install -r requirements-dev.txt
-   - run: python -m py_compile backend/app/ml/experiments/exp132_scale_regime_cost.py scripts/run_exp132_cost.py
-   - env: {PYTHONPATH: '${{ github.workspace }}'}
-     run: python scripts/run_exp132_cost.py --end 2021 --output audit_outputs/exp132_2001_2021.json
-   - uses: actions/upload-artifact@v4
-     if: always()
-     with: {name: exp132-2001-2021, path: audit_outputs/exp132_2001_2021.json, if-no-files-found: warn}
+  oof:
+    if: github.head_ref == 'experiment-132-scale-regime-cost'
+    name: OOF ${{ matrix.year }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        year: [2018, 2019, 2020, 2021]
+    env:
+      PYTHONUNBUFFERED: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      NUMEXPR_NUM_THREADS: '2'
+      LOKY_MAX_CPU_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m py_compile backend/app/ml/experiments/exp132_scale_regime_cost.py scripts/run_exp132_cost.py
+      - name: Build exact strict-forward production Cost OOF fold
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: >-
+          python scripts/run_exp132_cost.py
+          --oof-year ${{ matrix.year }}
+          --output audit_oof/cost-oof-${{ matrix.year }}.pkl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp132-cost-oof-${{ matrix.year }}
+          path: audit_oof/cost-oof-${{ matrix.year }}.pkl
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    if: github.head_ref == 'experiment-132-scale-regime-cost'
+    name: full 2001-2021 comparison
+    needs: oof
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUNBUFFERED: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      NUMEXPR_NUM_THREADS: '2'
+      LOKY_MAX_CPU_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m py_compile backend/app/ml/experiments/exp132_scale_regime_cost.py scripts/run_exp132_cost.py
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: exp132-cost-oof-*
+          path: audit_oof
+          merge-multiple: true
+      - name: Verify all strict OOF shards arrived
+        run: |
+          test -f audit_oof/cost-oof-2018.pkl
+          test -f audit_oof/cost-oof-2019.pkl
+          test -f audit_oof/cost-oof-2020.pkl
+          test -f audit_oof/cost-oof-2021.pkl
+      - name: Run Exp132 from exact precomputed OOF
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: >-
+          python scripts/run_exp132_cost.py
+          --end 2021
+          --oof-dir audit_oof
+          --output audit_outputs/exp132_2001_2021.json
+      - name: Show result
+        if: always()
+        run: test ! -f audit_outputs/exp132_2001_2021.json || cat audit_outputs/exp132_2001_2021.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp132-2001-2021
+          path: audit_outputs/exp132_2001_2021.json
+          if-no-files-found: warn
