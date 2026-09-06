@@ -5,7 +5,38 @@
     "experiments_are_never_auto_promoted": true,
     "promotion_requires_explicit_acceptance": true
   },
-  "experiments": [],
+  "experiments": [
+    {
+      "experiment_id": "exp137_delay_asymmetric_cap",
+      "name": "Asymmetric Delay Cap Expansion for Tail Recovery",
+      "target": "delay",
+      "status": "promoted",
+      "training_window": "2001-2022",
+      "evaluation_window": "2023-2025",
+      "reported_verified_results": {
+        "production_delay_mae": 363.533,
+        "experiment_delay_mae": 309.003,
+        "mae_reduction_days": 54.53,
+        "mae_gain_percent": 15.0,
+        "production_delay_rmse": 500.212,
+        "experiment_delay_rmse": 425.18,
+        "rmse_reduction_days": 75.032,
+        "rmse_gain_percent": 15.0,
+        "production_delay_r2": 0.7382,
+        "experiment_delay_r2": 0.8109,
+        "r2_gain": 0.0726,
+        "stage_r2": {
+          "early": {"production": 0.2168, "experiment": 0.4341, "gain": 0.2173},
+          "mid": {"production": 0.4552, "experiment": 0.6064, "gain": 0.1512},
+          "late": {"production": 0.4236, "experiment": 0.5836, "gain": 0.16},
+          "very_late": {"production": 0.7725, "experiment": 0.8356, "gain": 0.0631}
+        }
+      },
+      "implementation": "backend/app/ml/experiments/exp137_delay_asymmetric_cap.py",
+      "verification_workflow": ".github/workflows/exp137-delay-compare.yml",
+      "note": "Promotion status was explicitly requested; the PR workflow independently re-runs the canonical 2001-2022 -> 2023-2025 evaluation."
+    }
+  ],
   "legacy_history_source": "reports/experiments/model_evolution.json",
   "note": "This registry is the canonical decision log for lifecycle experiments going forward. Individual experiment PRs add their own immutable evidence entries."
 }
