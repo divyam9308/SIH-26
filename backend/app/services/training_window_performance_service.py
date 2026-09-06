@@ -1,4 +1,4 @@
-"""Latest persisted production evaluations for the requested training windows."""
+"""Verified persisted lifecycle evaluations for selected training windows."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,21 +8,26 @@ from pathlib import Path
 from backend.app.core.config import MODELS_DIR
 
 
-WINDOWS = ((2001, 2017), (2001, 2021), (2001, 2022))
-def _artifact_path(window: str) -> Path:
-    return MODELS_DIR / window / "evaluation_results.json"
+WINDOWS = ((2001, 2020), (2001, 2021), (2001, 2022))
 
 
-def _latest_artifact(window: str) -> tuple[Path, str]:
-    lifecycle = MODELS_DIR / "monthly_lifecycle" / window / "evaluation_results.json"
-    if lifecycle.exists():
-        manifest = lifecycle.with_name("run_manifest.json")
-        if manifest.exists() and json.loads(manifest.read_text()).get("status") == "complete":
-            return lifecycle, "canonical_monthly_lifecycle"
-    legacy = _artifact_path(window)
-    if legacy.exists():
-        return legacy, "persisted_production_evaluation"
-    raise FileNotFoundError(f"Saved production evaluation for {window} is unavailable.")
+def _verified_artifact(window: str) -> Path:
+    root = MODELS_DIR / "monthly_lifecycle" / window
+    evaluation = root / "evaluation_results.json"
+    manifest_path = root / "run_manifest.json"
+    if not evaluation.exists() or not manifest_path.exists():
+        raise FileNotFoundError(f"Verified lifecycle evaluation for {window} is unavailable.")
+
+    manifest = json.loads(manifest_path.read_text())
+    raw = json.loads(evaluation.read_text())
+    metadata = raw.get("metadata") or {}
+    if manifest.get("status") != "complete":
+        raise ValueError(f"Lifecycle evaluation for {window} is not complete.")
+    if not manifest.get("run_id") or manifest.get("run_id") != metadata.get("run_id"):
+        raise ValueError(f"Lifecycle evaluation for {window} has invalid run provenance.")
+    if not manifest.get("dataset_fingerprint") or manifest.get("dataset_fingerprint") != metadata.get("dataset_fingerprint"):
+        raise ValueError(f"Lifecycle evaluation for {window} has invalid dataset provenance.")
+    return evaluation
 
 
 def training_window_performance() -> dict:
@@ -30,7 +35,7 @@ def training_window_performance() -> dict:
     results = []
     for start_year, end_year in WINDOWS:
         window = f"{start_year}_{end_year}"
-        path, source = _latest_artifact(window)
+        path = _verified_artifact(window)
         raw = json.loads(path.read_text())
         metadata = raw.get("metadata") or {}
         lifecycle = raw.get("lifecycle") or {}
@@ -49,20 +54,20 @@ def training_window_performance() -> dict:
             "delay_r2": float(delay["R2"]),
             "sample_count": int(cost.get("unique_projects") or metadata.get("testing_samples") or 0),
             "evaluation_period": f"{(metadata.get('testing_period') or [metadata.get('evaluated_test_start'), metadata.get('evaluated_test_end')])[0]}–{(metadata.get('testing_period') or [metadata.get('evaluated_test_start'), metadata.get('evaluated_test_end')])[1]}",
-            "source": source,
+            "source": "verified_canonical_monthly_lifecycle",
         })
 
     generated_at = max(timestamps).astimezone(timezone.utc).isoformat() if timestamps else datetime.fromtimestamp(
-        max(_latest_artifact(f"{start}_{end}")[0].stat().st_mtime for start, end in WINDOWS), timezone.utc
+        max(_verified_artifact(f"{start}_{end}").stat().st_mtime for start, end in WINDOWS), timezone.utc
     ).isoformat()
     return {
         "windows": results,
-        "evaluation_period": "Each saved production artifact's latest temporal holdout",
+        "evaluation_period": "Each artifact's own temporal holdout; cohorts differ by training window.",
         "sample_count": None,
         "generated_at": generated_at,
         "methodology": (
-            "The newest complete canonical monthly-lifecycle evaluations are used where available; "
-            "2001–2017 falls back to its newest persisted production evaluation because no equivalent lifecycle artifact exists. "
+            "Only complete canonical monthly-lifecycle evaluations with matching run and dataset provenance are used. "
+            "Each training window has its own future temporal holdout, so values are descriptive and not a shared-cohort ranking. "
             "Cost MAE is percentage points; Delay MAE is days; R² is the cost-model R²."
         ),
     }
