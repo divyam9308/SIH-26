@@ -15,11 +15,9 @@ on:
       - 'backend/app/ml/production_exp105_exp113_baseline.py'
       - 'backend/app/ml/production_u1_delay_baseline.py'
       - 'backend/app/services/lifecycle_retraining_service_u1.py'
-      - 'backend/app/routes/models.py'
       - 'scripts/run_u1_delay_production_fresh.py'
       - 'tests/test_production_u1_delay.py'
       - 'tests/test_production_exp105_exp113.py'
-      - '.github/workflows/u1-delay-production-verify.yml'
   workflow_dispatch:
 
 jobs:
