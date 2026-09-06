@@ -1,0 +1,22 @@
+name: Exp131 Cost 2001-2021
+on:
+  pull_request:
+    branches: [main]
+    paths: ['backend/app/ml/experiments/exp131_stagnation_decoupling_cost.py','scripts/run_exp131_cost.py','.github/workflows/exp131-cost-compare.yml']
+jobs:
+  compare:
+    if: github.head_ref == 'experiment-131-stagnation-decoupling-cost'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m py_compile backend/app/ml/experiments/exp131_stagnation_decoupling_cost.py scripts/run_exp131_cost.py
+      - name: Compare 2001-2021 only
+        env: {PYTHONPATH: '${{ github.workspace }}'}
+        run: python scripts/run_exp131_cost.py --end 2021 --output audit_outputs/exp131_2001_2021.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: exp131-2001-2021, path: audit_outputs/exp131_2001_2021.json, if-no-files-found: warn}
