@@ -1,0 +1,60 @@
+name: Exp135 Cost canonical comparisons
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/exp135_log_space_cost.py'
+      - 'scripts/run_exp135_cost.py'
+      - 'tests/test_exp135_log_space_cost.py'
+      - '.github/workflows/exp135-cost-compare.yml'
+  workflow_dispatch:
+
+jobs:
+  unit:
+    if: github.head_ref == 'experiment-135-log-space-cost'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m py_compile backend/app/ml/experiments/exp135_log_space_cost.py scripts/run_exp135_cost.py
+      - name: Exp135 and production wrapper unit tests
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: pytest -q tests/test_exp135_log_space_cost.py tests/test_production_exp105_exp113.py
+
+  compare:
+    if: github.head_ref == 'experiment-135-log-space-cost'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        end: [2021, 2022]
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Run Exp135 canonical comparison
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: >-
+          python scripts/run_exp135_cost.py
+          --end ${{ matrix.end }}
+          --output audit_outputs/exp135_2001_${{ matrix.end }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp135-2001-${{ matrix.end }}
+          path: audit_outputs/exp135_2001_${{ matrix.end }}.json
+          if-no-files-found: warn
