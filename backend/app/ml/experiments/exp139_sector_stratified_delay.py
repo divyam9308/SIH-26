@@ -2,24 +2,33 @@
 
 Strict-forward challenger on top of the current Exp113 production Delay stack.
 Retains Exp137 structural lag features, but replaces one global asymmetric cap
-with deterministic sector-specific bounds. Scale selection uses only forward OOF
-folds; supported audits are 2001-2021 -> 2022-2025 and 2001-2022 -> 2023-2025.
+with deterministic sector-specific bounds. The audit is restricted to
+2001-2022 training -> 2023-2025 evaluation. Strict production OOF folds are
+shardable so GitHub Actions does not rebuild all six folds serially in one job.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
+from backend.app.ml.experiments.nextgen_common import _prepare, normalize_taxonomy
 from backend.app.ml.experiments.post_exp113_delay_common import (
+    _production_oof_fold,
+    forward_folds,
     numeric_design,
     prepare_context,
     production_oof,
 )
-from backend.app.ml.monthly_training import _json_safe, _regression_metrics
+from backend.app.ml.monthly_lifecycle import build_training_dataset
+from backend.app.ml.monthly_training import _json_safe, _regression_metrics, temporal_project_split
+from backend.app.ml.production_exp61_baseline import _build_temporal_delay_priors
+
+OOF_YEARS = (2017, 2018, 2019, 2020, 2021, 2022)
 
 SECTOR_RESIDUAL_CAPS = {
     "railways": (-600.0, 2500.0),
@@ -126,6 +135,83 @@ def _stage_metrics(frame: pd.DataFrame, prediction: np.ndarray) -> dict:
     return result
 
 
+def _training_context():
+    data, identity = build_training_dataset()
+    prepared = normalize_taxonomy(_prepare(data))
+    train, test = temporal_project_split(prepared, 2001, 2022, 2025)
+    train, _, _ = _build_temporal_delay_priors(train, test)
+    return {"full_data": data, "identity": identity, "train": train}
+
+
+def _selected_oof_folds(train, max_folds=6):
+    return {
+        int(year): validation
+        for _, validation, year in forward_folds(train, max_folds)
+        if int(year) - 1 >= 2005
+    }
+
+
+def build_oof_fold(year: int, output: str):
+    ctx = _training_context()
+    folds = _selected_oof_folds(ctx["train"], max_folds=6)
+    if tuple(sorted(folds)) != OOF_YEARS:
+        raise ValueError(f"Current training frame selected OOF years {sorted(folds)} != {list(OOF_YEARS)}")
+    if int(year) not in folds:
+        raise ValueError(f"OOF year {year} not selected; expected {sorted(folds)}")
+    part = _production_oof_fold(
+        folds[int(year)], int(year), ctx["full_data"], ctx["identity"]
+    )
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(part, path, compress=3)
+    print(f"EXP139_PRODUCTION_OOF_FOLD_COMPLETED={year}; rows={len(part)}", flush=True)
+    return path
+
+
+def load_oof_dir(directory: str | Path, expected=OOF_YEARS):
+    paths = sorted(Path(directory).glob("delay-oof-*.pkl"))
+    if not paths:
+        raise FileNotFoundError(f"No Exp139 Delay OOF artifacts in {directory}")
+    parts = [joblib.load(path) for path in paths]
+    years = [int(pd.to_numeric(part["oof_year"], errors="raise").iloc[0]) for part in parts]
+    if tuple(sorted(years)) != tuple(expected):
+        raise ValueError(f"OOF years {sorted(years)} != {list(expected)}")
+    if len(set(years)) != len(years):
+        raise ValueError("Duplicate Exp139 OOF year artifacts")
+    return pd.concat(parts, ignore_index=True).sort_values(
+        ["oof_year", "canonical_project_id", "snapshot_date"], kind="mergesort"
+    ).reset_index(drop=True)
+
+
+def _validate_precomputed_oof(oof: pd.DataFrame, train: pd.DataFrame):
+    folds = _selected_oof_folds(train, max_folds=6)
+    years = sorted(int(value) for value in pd.to_numeric(oof["oof_year"], errors="raise").unique())
+    if tuple(years) != OOF_YEARS:
+        raise ValueError(f"Precomputed OOF years {years} != {list(OOF_YEARS)}")
+    if tuple(sorted(folds)) != OOF_YEARS:
+        raise ValueError(f"Current training frame selected OOF years {sorted(folds)} != {list(OOF_YEARS)}")
+    for year in OOF_YEARS:
+        expected = folds[year]
+        actual = oof.loc[pd.to_numeric(oof["oof_year"], errors="coerce") == year]
+        if len(actual) != len(expected):
+            raise ValueError(f"OOF {year} row count {len(actual)} != expected {len(expected)}")
+        expected_keys = set(
+            zip(
+                expected["canonical_project_id"].astype(str),
+                pd.to_datetime(expected["snapshot_date"], errors="coerce").astype(str),
+            )
+        )
+        actual_keys = set(
+            zip(
+                actual["canonical_project_id"].astype(str),
+                pd.to_datetime(actual["snapshot_date"], errors="coerce").astype(str),
+            )
+        )
+        if actual_keys != expected_keys:
+            raise ValueError(f"OOF {year} row identity mismatch")
+    return oof.copy()
+
+
 def _fit_sector_stratified_residual(oof: pd.DataFrame, score: pd.DataFrame):
     oof = add_structural_lag_features(oof)
     score = add_structural_lag_features(score)
@@ -196,17 +282,25 @@ def _fit_sector_stratified_residual(oof: pd.DataFrame, score: pd.DataFrame):
         "medians": medians,
         "sector_residual_caps": SECTOR_RESIDUAL_CAPS,
         "meta_oof_years": years[1:],
+        "oof_years": years,
         "cap_policy": "sector-stratified asymmetric fixed bounds",
     }
 
 
-def fit_experiment(end: int = 2022, output: str | None = None) -> dict:
-    if end not in (2021, 2022):
-        raise ValueError("Exp139 supports only 2001-2021 and 2001-2022 training windows")
+def fit_experiment(
+    end: int = 2022,
+    output: str | None = None,
+    precomputed_oof: pd.DataFrame | None = None,
+) -> dict:
+    if end != 2022:
+        raise ValueError("Exp139 audit is restricted to 2001-2022 training -> 2023-2025 evaluation")
     if output is None:
-        output = f"reports/experiments/exp139_sector_stratified_delay_2001_{end}.json"
+        output = "reports/experiments/exp139_sector_stratified_delay_2001_2022.json"
     ctx = prepare_context(end)
-    oof = production_oof(ctx, max_folds=6)
+    if precomputed_oof is None:
+        oof = production_oof(ctx, max_folds=6)
+    else:
+        oof = _validate_precomputed_oof(precomputed_oof, ctx["train"])
     score = ctx["cohort"].copy()
     score["production_prediction"] = np.asarray(ctx["production_delay"], dtype=float)
     correction, details = _fit_sector_stratified_residual(oof, score)
@@ -226,9 +320,9 @@ def fit_experiment(end: int = 2022, output: str | None = None) -> dict:
         "experiment_name": "Sector-Stratified Asymmetric Delay Cap Expansion",
         "scope": "delay",
         "training_start": 2001,
-        "training_end": int(end),
-        "test_start": int(ctx["test_start"]),
-        "test_end": int(ctx["test_end"]),
+        "training_end": 2022,
+        "test_start": 2023,
+        "test_end": 2025,
         "production_delay_metrics": production_metrics,
         "experiment_delay_metrics": experiment_metrics,
         "production_stage_metrics": production_stage,
