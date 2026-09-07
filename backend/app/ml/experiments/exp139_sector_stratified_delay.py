@@ -127,7 +127,7 @@ def _stage_metrics(frame: pd.DataFrame, prediction: np.ndarray) -> dict:
             "available": True,
             **_regression_metrics(
                 sub["actual_delay_days"],
-                pred[mask.to_numpy()],
+                pred[mask.fillna(False).to_numpy(dtype=bool)],
                 sub["sample_weight"],
                 sub["canonical_project_id"],
             ),

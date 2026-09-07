@@ -3,6 +3,7 @@ import pandas as pd
 
 from backend.app.ml.experiments.exp139_sector_stratified_delay import (
     SECTOR_RESIDUAL_CAPS,
+    _stage_metrics,
     add_structural_lag_features,
     apply_sector_caps,
     sector_cap_arrays,
@@ -61,3 +62,20 @@ def test_structural_lag_features_match_specification():
     assert out["is_railways_sector"].tolist() == [1.0, 0.0]
     assert out["elapsed_over_10yr"].tolist() == [1.0, 0.0]
     assert out["stagnant_progress_24m"].tolist() == [1.0, 0.0]
+
+
+def test_stage_metrics_accepts_missing_lifecycle_stages():
+    frame = pd.DataFrame(
+        {
+            "lifecycle_stage": ["early", "early", pd.NA],
+            "actual_delay_days": [100.0, 120.0, 140.0],
+            "sample_weight": [1.0, 1.0, 1.0],
+            "canonical_project_id": ["a", "b", "c"],
+        }
+    )
+
+    metrics = _stage_metrics(frame, np.asarray([110.0, 130.0, 150.0]))
+
+    assert metrics["early"]["available"] is True
+    assert metrics["early"]["rows"] == 2
+    assert metrics["mid"] == {"available": False}
