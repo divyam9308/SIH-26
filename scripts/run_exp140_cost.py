@@ -1,18 +1,36 @@
+"""Run Exp140 on one canonical historical window without touching production artifacts."""
 from __future__ import annotations
 
 import argparse
+import json
+import tempfile
 from pathlib import Path
 
-from backend.app.ml.experiments.exp140_uncertainty_cost import fit_experiment
+from backend.app.ml.experiments.exp140_uncertainty_cost import train_window_with_exp140
+from backend.app.ml.monthly_lifecycle import build_training_dataset
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Exp140 Uncertainty-Aware Cost Challenger")
-    parser.add_argument("--end", type=int, choices=[2021, 2022], default=2022)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--end", type=int, choices=[2021, 2022], required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    fit_experiment(training_start=2001, training_end=args.end, output=args.output)
+    data, identity = build_training_dataset()
+    with tempfile.TemporaryDirectory(prefix=f"exp140-{args.end}-") as td:
+        result = train_window_with_exp140(
+            2001,
+            args.end,
+            2025,
+            data=data,
+            identity=identity,
+            artifact_root=Path(td) / "models",
+        )
+    payload = result["exp140"]
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
+    print(json.dumps(payload, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
