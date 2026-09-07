@@ -18,18 +18,28 @@ export interface ValidationRow {
   cost_error: number | null; predicted_delay_days: number | null; actual_delay_days: number | null; delay_error: number | null;
   predicted_risk?: number | string; actual_risk?: number | string; risk_probability?: number | null; model_confidence_percentage: number | null;
 }
-export interface RollingFold { test_year: number; cost_MAE: number; delay_MAE_days: number; risk_f1?: number }
-export interface RollingValidation { model_version: string; folds: RollingFold[]; fold_count: number; policy?: string; status?: string }
-export interface PredictionAccuracyData { report: ValidationReport; rows: ValidationRow[] | null; total: number | null; rolling: RollingValidation | null; }
-
-const isAbort = (reason: unknown) => reason instanceof DOMException && reason.name === 'AbortError';
+export interface RollingFold { test_year: number; cost_MAE: number; delay_MAE_days: number; risk_f1?: number; test_projects?: number; test_snapshots?: number }
+export interface RollingValidation { model_version: string; folds: RollingFold[]; fold_count: number; policy?: string; status?: string; training_period?: number[]; testing_period?: number[] }
+export interface PredictionAccuracyData { report: ValidationReport; rows: ValidationRow[]; total: number; rolling: RollingValidation; }
 
 export async function getPredictionAccuracyData(window: string, signal?: AbortSignal): Promise<PredictionAccuracyData> {
   const query = `?model_version=${encodeURIComponent(window)}`;
-  const report = await apiGet<ValidationReport>(`/api/models/validation${query}`, signal);
-  const [evidence, rolling] = await Promise.all([
-    apiGet<{ model_version?: string; items: ValidationRow[]; total: number }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}`, signal).catch((reason: unknown) => { if (isAbort(reason)) throw reason; return null; }),
-    apiGet<RollingValidation>(`/api/models/rolling-validation${query}`, signal).catch((reason: unknown) => { if (isAbort(reason)) throw reason; return null; }),
+  const [report, evidence, rolling] = await Promise.all([
+    apiGet<ValidationReport>(`/api/models/validation${query}`, signal),
+    apiGet<{ model_version?: string; items: ValidationRow[]; total: number }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}`, signal),
+    apiGet<RollingValidation>(`/api/models/rolling-validation${query}`, signal),
   ]);
-  return { report, rows: evidence?.items ?? null, total: evidence?.total ?? null, rolling };
+
+  if (!evidence.items?.length || evidence.total < 1) {
+    throw new Error(`Production validation evidence for ${window} is empty.`);
+  }
+  if (!rolling.folds?.length || rolling.fold_count !== rolling.folds.length) {
+    throw new Error(`Annual holdout metrics for ${window} are missing or incomplete.`);
+  }
+  const years = rolling.folds.map((fold) => Number(fold.test_year));
+  if (window === '2001_2021' && JSON.stringify(years) !== JSON.stringify([2022, 2023, 2024, 2025])) {
+    throw new Error(`Expected 2022–2025 graph evidence for ${window}; received ${years.join(', ')}.`);
+  }
+
+  return { report, rows: evidence.items, total: evidence.total, rolling };
 }
