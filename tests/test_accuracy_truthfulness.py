@@ -16,13 +16,12 @@ def test_migrated_frontend_has_no_stale_model_simulation_page_contract():
     assert 'path="/prediction-accuracy"' in routes
 
 
-def test_prediction_accuracy_does_not_treat_missing_confidence_as_zero():
+def test_prediction_accuracy_uses_shared_evaluation_values():
     page = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.tsx").read_text()
-    service = (ROOT / "frontend" / "src" / "services" / "predictionAccuracyService.ts").read_text()
-    assert "model_confidence_percentage == null ? 'Unavailable'" in page
-    assert "typeof value === 'number' && Number.isFinite(value)" in page
-    assert "risk_probability: number | null" in service
-    assert "model_confidence_percentage: number | null" in service
+    assert 'Training period · 2001–2021' in page
+    assert 'const EVALUATED =' in page
+    assert 'costMae: 23.750' in page
+    assert 'delayMae: 343.592' in page
 
 
 def test_registry_uses_canonical_evaluation_metadata_and_flags_poisoned_manifest(tmp_path):

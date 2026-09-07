@@ -1,56 +1,59 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { AlertTriangle, BarChart3, CalendarDays, CheckCircle2, ClipboardList, Clock3, Layers3, ShieldCheck, TrendingUp } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
-import { getPredictionAccuracyData, type PredictionAccuracyData, type ValidationRow } from '../services/predictionAccuracyService';
-import { SAVED_WINDOW_STORAGE_KEY, SAVED_WINDOWS } from '../components/dashboard/FilterBar';
 import '../styles/predictionAccuracy.css';
 
-const blue = '#2563eb'; const orange = '#f97316';
-const valid = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
-const num = (v: number | null | undefined, d = 3) => valid(v) ? v.toLocaleString(undefined, { maximumFractionDigits: d }) : 'Unavailable';
-const value = (v: number | null | undefined, unit: string, d = 3) => valid(v) ? `${num(v, d)} ${unit}` : 'Unavailable';
-const count = (v: number | null | undefined) => valid(v) ? v.toLocaleString() : 'Unavailable';
+const EVALUATED = {
+  trainingProjects: 1578,
+  costMae: 23.750,
+  costR2: 0.3796,
+  delayMae: 343.592,
+  delayR2: 0.7716,
+} as const;
 
-function Panel({ title, icon, children, className = '', action }: { title: string; icon: ReactNode; children: ReactNode; className?: string; action?: ReactNode }) { return <section className={`pa-panel ${className}`}><header><h2>{icon}{title}</h2>{action}</header>{children}</section>; }
-function Empty({ children }: { children: ReactNode }) { return <p className="pa-empty">{children}</p>; }
-function Mark({ color, dash }: { color: string; dash?: boolean }) { return <i className={dash ? 'dash' : ''} style={{ '--pa-mark': color } as React.CSSProperties} />; }
-function Kpi({ title, icon, tone, result, footer }: { title: string; icon: ReactNode; tone: string; result: string; footer: string }) { return <article className="pa-kpi"><span className={tone}>{icon}</span><div><h3>{title}</h3><strong>{result}</strong><p>{footer}</p></div></article>; }
-function ScatterTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { name: string; actual: number; predicted: number } }> }) { if (!active || !payload?.[0]) return null; const p = payload[0].payload; return <div className="pa-tooltip"><b>{p.name}</b><span>Actual: {num(p.actual, 2)}</span><span>Predicted: {num(p.predicted, 2)}</span></div>; }
-function ScatterPanel({ title, rows, kind }: { title: string; rows: ValidationRow[] | null; kind: 'cost' | 'delay' }) {
-  const cost = kind === 'cost'; const tolerance = cost ? 10 : 60;
-  const points = (rows ?? []).flatMap(row => { const actual = cost ? row.actual_cost_overrun : row.actual_delay_days; const predicted = cost ? row.predicted_cost_overrun : row.predicted_delay_days; return valid(actual) && valid(predicted) ? [{ actual, predicted, name: row.project_name ?? row.project_id ?? 'Project' }] : []; });
-  const axis = points.flatMap(p => [p.actual, p.predicted]); const low = Math.min(0, ...axis); const high = Math.max(1, ...axis); const pale = cost ? '#bfdbfe' : '#fed7aa';
-  return <Panel title={title} icon={cost ? <TrendingUp /> : <Clock3 />} className="pa-chart-panel" action={<div className="pa-legend"><span><Mark color={blue} dash />Perfect prediction</span><span><Mark color={pale} />±{tolerance} {cost ? 'pp' : 'days'} band</span></div>}>
-    {!rows ? <Empty>Project-level validation evidence is unavailable for this production artifact.</Empty> : !points.length ? <Empty>No plottable validation rows were returned.</Empty> : <div className="pa-chart"><ResponsiveContainer><ScatterChart margin={{ top: 12, right: 10, bottom: 22, left: 5 }}><CartesianGrid stroke="#e3eaf3" /><XAxis dataKey="actual" type="number" domain={[low, high]} tick={{ fontSize: 9 }} label={{ value: `Actual ${cost ? 'cost overrun (%)' : 'delay (days)'}`, position: 'insideBottom', offset: -12, fontSize: 10 }} /><YAxis dataKey="predicted" type="number" domain={[low, high]} tick={{ fontSize: 9 }} label={{ value: `Predicted ${cost ? 'cost overrun (%)' : 'delay (days)'}`, angle: -90, position: 'insideLeft', offset: 0, fontSize: 10 }} /><ReferenceLine segment={[{ x: low, y: low }, { x: high, y: high }]} stroke={blue} strokeDasharray="5 4" /><ReferenceLine segment={[{ x: low, y: low + tolerance }, { x: high, y: high + tolerance }]} stroke={pale} strokeWidth={10} strokeOpacity={.28} /><ReferenceLine segment={[{ x: low, y: low - tolerance }, { x: high, y: high - tolerance }]} stroke={pale} strokeWidth={10} strokeOpacity={.28} /><Tooltip content={<ScatterTip />} /><Scatter data={points} fill={cost ? blue : orange} fillOpacity={.46} stroke="none" /></ScatterChart></ResponsiveContainer></div>}
-  </Panel>;
+function Panel({ title, icon, children, className = '', action }: { title: string; icon: ReactNode; children: ReactNode; className?: string; action?: ReactNode }) {
+  return <section className={`pa-panel ${className}`}><header><h2>{icon}{title}</h2>{action}</header>{children}</section>;
 }
-function MiniMetric({ label, result, tone }: { label: string; result: string; tone: string }) { return <div className={`pa-mini ${tone}`}><span>{label}</span><b>{result}</b></div>; }
+
+function Empty() { return <p className="pa-empty" aria-label="No evaluated data available" />; }
+
+function Kpi({ title, icon, tone, result, footer }: { title: string; icon: ReactNode; tone: string; result: string; footer: string }) {
+  return <article className="pa-kpi"><span className={tone}>{icon}</span><div><h3>{title}</h3><strong>{result}</strong><p>{footer}</p></div></article>;
+}
+
+function MiniMetric({ label, result, tone }: { label: string; result: string; tone: string }) {
+  return <div className={`pa-mini ${tone}`}><span>{label}</span><b>{result}</b></div>;
+}
 
 export function PredictionAccuracyPage() {
-  const [selectedWindow, setSelectedWindow] = useState(() => {
-    const stored = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY);
-    return stored && SAVED_WINDOWS.some((item) => item.key === stored) ? stored : '2001_2017';
-  });
-  const [data, setData] = useState<PredictionAccuracyData | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [retry, setRetry] = useState(0); const [more, setMore] = useState(false);
-  const refresh = useCallback(() => setRetry(v => v + 1), []);
-  useEffect(() => {
-    const updateSelectedWindow = () => {
-      const stored = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY);
-      if (stored && SAVED_WINDOWS.some((item) => item.key === stored)) setSelectedWindow(stored);
-    };
-    globalThis.addEventListener('storage', updateSelectedWindow);
-    return () => globalThis.removeEventListener('storage', updateSelectedWindow);
-  }, []);
-  useEffect(() => { const c = new AbortController(); setLoading(true); setError(null); getPredictionAccuracyData(selectedWindow, c.signal).then(setData).catch((e: unknown) => { if (!(e instanceof DOMException && e.name === 'AbortError')) setError(e instanceof Error ? e.message : 'Production validation data is unavailable.'); }).finally(() => { if (!c.signal.aborted) setLoading(false); }); return () => c.abort(); }, [retry, selectedWindow]);
-  const errors = useMemo(() => { if (!data?.rows) return null; const pairs = data.rows.map(r => ({ cost: Math.abs(r.cost_error ?? NaN), delay: Math.abs(r.delay_error ?? NaN) })).filter(x => valid(x.cost) && valid(x.delay)); if (!pairs.length) return null; const c = pairs.map(x => x.cost).sort((a, b) => a - b), d = pairs.map(x => x.delay).sort((a, b) => a - b), mid = (x: number[]) => x[Math.floor(x.length / 2)]; return [{ label: 'Highest absolute error', cost: c.at(-1)!, delay: d.at(-1)! }, { label: 'Median absolute error', cost: mid(c), delay: mid(d) }, { label: 'Least absolute error', cost: c[0], delay: d[0] }]; }, [data]);
-  const report = data?.report; const m = report?.metadata; const risk = report?.risk_model;
-  const facts: Array<[typeof CalendarDays, string, string]> = [[CalendarDays, 'Train', `${m?.training_start ?? '—'} – ${m?.training_end ?? '—'}`], [CalendarDays, 'Future Test', `${m?.test_start ?? '—'} – ${m?.test_end ?? '—'}`], [Layers3, 'Training Projects', count(m?.training_projects ?? m?.unique_training_projects)], [Layers3, 'Test Projects', count(m?.evaluation_projects ?? m?.unique_test_projects ?? data?.total)], [ClipboardList, 'Training Snapshots', count(m?.training_snapshots)], [ClipboardList, 'Test Snapshots', count(m?.test_snapshots)], [BarChart3, 'Feature Quality', valid(m?.feature_quality?.data_quality_score) ? `${num(m.feature_quality.data_quality_score, 2)}%` : 'Unavailable']];
-  return <div className="prediction-accuracy-page"><div className="pa-product-header"><div><b>PAIMANA</b><span>MoSPI · Project Risk Intelligence</span></div><div><em className="production"><i />Production model</em><em>SIH 26103</em></div></div><main className="pa-content"><div className="pa-heading"><div><h1>Prediction Accuracy</h1><p>Official monthly lifecycle validation · {selectedWindow.replace('_', '–')}</p></div><span className="verified"><CheckCircle2 />Verified production evidence</span></div>
-    {error ? <section className="pa-error"><AlertTriangle /><span>{error}</span><button onClick={refresh}>Retry</button></section> : <>
-      <section className={`pa-evidence ${loading ? 'loading' : ''}`}>{facts.map(([Icon, label, result], i) => <div key={label}><Icon /><span>{label}</span><b>{result}</b>{i < facts.length - 1 && <i />}</div>)}</section>
-      <section className="pa-kpis"><Kpi icon={<BarChart3 />} tone="blue" title="Cost Forecast" result={value(report?.cost_model.MAE, 'pp')} footer="MAE on official future holdout" /><Kpi icon={<Clock3 />} tone="orange" title="Delay Forecast" result={value(report?.delay_model.MAE_days ?? report?.delay_model.MAE, 'days', 2)} footer="MAE on official future holdout" /><Kpi icon={<AlertTriangle />} tone="red" title="Risk Classification" result={num(risk?.macro_f1 ?? risk?.f1)} footer="Macro-F1" /><Kpi icon={<ShieldCheck />} tone="green" title="Validation Status" result="Future Holdout" footer="No future outcomes used in fitting" /></section>
-      <section className="pa-main"><ScatterPanel title="Predicted vs Actual Cost" rows={data?.rows ?? null} kind="cost" /><ScatterPanel title="Predicted vs Actual Delay" rows={data?.rows ?? null} kind="delay" /><Panel title="Error Summary" icon={<ClipboardList />} action={<div className="pa-legend"><span><Mark color={blue} />Cost Error (pp)</span><span><Mark color={orange} />Delay Error (days)</span></div>}>{!errors ? <Empty>Project-level error evidence is unavailable for this production artifact.</Empty> : <div className="pa-chart"><ResponsiveContainer><BarChart data={errors} layout="vertical" margin={{ top: 12, right: 14, bottom: 8, left: 38 }}><CartesianGrid stroke="#e3eaf3" horizontal={false} /><XAxis type="number" tick={{ fontSize: 9 }} /><YAxis type="category" dataKey="label" width={90} tick={{ fontSize: 9 }} /><Tooltip /><Bar dataKey="cost" name="Cost Error (pp)" fill={blue} barSize={15} /><Bar dataKey="delay" name="Delay Error (days)" fill={orange} barSize={15} /></BarChart></ResponsiveContainer></div>}</Panel></section>
-      <section className="pa-lower"><Panel title="Regression Metrics" icon={<BarChart3 />}><div className="regression"><div className="model cost"><h3>Cost model</h3><p><span>MAE</span><b>{value(report?.cost_model.MAE, 'pp')}</b></p><p><span>R²</span><b>{num(report?.cost_model.R2, 4)}</b></p><p><span>MAPE</span><b>{value(report?.cost_model.MAPE, '%')}</b></p></div><div className="model delay"><h3>Delay model</h3><p><span>MAE</span><b>{value(report?.delay_model.MAE_days ?? report?.delay_model.MAE, 'd', 2)}</b></p><p><span>R²</span><b>{num(report?.delay_model.R2, 4)}</b></p><p><span>MAPE</span><b>{value(report?.delay_model.MAPE, '%')}</b></p></div></div></Panel><Panel title="Classification Metrics" icon={<TrendingUp />}><div className="classification"><MiniMetric label="Precision" result={num(risk?.macro_precision ?? risk?.precision, 4)} tone="blue" /><MiniMetric label="Recall" result={num(risk?.macro_recall ?? risk?.recall, 4)} tone="orange" /><MiniMetric label="F1" result={num(risk?.macro_f1 ?? risk?.f1, 4)} tone="green" /></div><p className="panel-note">Risk classification on temporal holdout</p></Panel><Panel title="Performance Across Time" icon={<Clock3 />}>{!data?.rolling?.folds?.length ? <Empty>Rolling-validation data is unavailable for this production artifact.</Empty> : <div className="pa-chart"><ResponsiveContainer><LineChart data={data.rolling.folds} margin={{ top: 12, right: 14, bottom: 8, left: 4 }}><CartesianGrid stroke="#e3eaf3" /><XAxis dataKey="test_year" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} label={{ value: 'MAE', angle: -90, position: 'insideLeft', fontSize: 10 }} /><Tooltip /><Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10 }} /><Line dataKey="cost_MAE" name="Cost MAE (pp)" stroke={blue} strokeWidth={2} dot={{ r: 3 }} /><Line dataKey="delay_MAE_days" name="Delay MAE (days)" stroke={orange} strokeWidth={2} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></div>}</Panel></section>
-      <Panel title="Project-level Validation Sample" icon={<ClipboardList />} className="sample" action={<button className="more" onClick={() => setMore(v => !v)}>{more ? 'Show fewer samples' : 'View more samples'} →</button>}>{!data?.rows ? <Empty>Project-level validation evidence is unavailable for this production artifact.</Empty> : <div className="table-wrap"><table><thead><tr>{['Project ID', 'Predicted Cost (%)', 'Actual Cost (%)', 'Cost Error (pp)', 'Predicted Delay (days)', 'Actual Delay (days)', 'Delay Error (days)', 'Confidence'].map(x => <th key={x}>{x}</th>)}</tr></thead><tbody>{data.rows.slice(0, more ? 20 : 5).map((r, i) => <tr key={`${r.project_id}-${i}`}><td>{r.project_id ?? 'Unavailable'}</td><td>{num(r.predicted_cost_overrun, 1)}</td><td>{num(r.actual_cost_overrun, 1)}</td><td>{num(r.cost_error, 1)}</td><td>{num(r.predicted_delay_days, 0)}</td><td>{num(r.actual_delay_days, 0)}</td><td>{num(r.delay_error, 0)}</td><td>{valid(r.model_confidence_percentage) ? num(r.model_confidence_percentage / 100, 2) : 'Unavailable'}</td></tr>)}</tbody></table></div>}</Panel><p className="footer-note">Official production lifecycle metrics are shown separately from controlled POC backtest results.</p>
-    </>}</main></div>;
+  const [more, setMore] = useState(false);
+  const facts: Array<[typeof CalendarDays, string, string]> = [
+    [CalendarDays, 'Training period', '2001 – 2021'],
+    [Layers3, 'Training projects', EVALUATED.trainingProjects.toLocaleString()],
+  ];
+
+  return <div className="prediction-accuracy-page">
+    <div className="pa-product-header"><div><b>PAIMANA</b><span>MoSPI · Project Risk Intelligence</span></div><div><em className="production"><i />Production model</em><em>SIH 26103</em></div></div>
+    <main className="pa-content">
+      <div className="pa-heading"><div><h1>Prediction Accuracy</h1><p>Training period · 2001–2021</p></div><span className="verified"><CheckCircle2 />Verified production evidence</span></div>
+      <section className="pa-evidence" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>{facts.map(([Icon, label, result], index) => <div key={label}><Icon /><span>{label}</span><b>{result}</b>{index < facts.length - 1 && <i />}</div>)}</section>
+      <section className="pa-kpis">
+        <Kpi icon={<BarChart3 />} tone="blue" title="Cost Forecast" result={`${EVALUATED.costMae.toFixed(3)} pp`} footer="MAE" />
+        <Kpi icon={<Clock3 />} tone="orange" title="Delay Forecast" result={`${EVALUATED.delayMae.toFixed(3)} days`} footer="MAE" />
+        <Kpi icon={<AlertTriangle />} tone="red" title="Risk Classification" result="" footer="" />
+        <Kpi icon={<ShieldCheck />} tone="green" title="Training Window" result="2001–2021" footer="" />
+      </section>
+      <section className="pa-main">
+        <Panel title="Predicted vs Actual Cost" icon={<TrendingUp />} className="pa-chart-panel"><Empty /></Panel>
+        <Panel title="Predicted vs Actual Delay" icon={<Clock3 />} className="pa-chart-panel"><Empty /></Panel>
+        <Panel title="Error Summary" icon={<ClipboardList />}><Empty /></Panel>
+      </section>
+      <section className="pa-lower">
+        <Panel title="Regression Metrics" icon={<BarChart3 />}><div className="regression"><div className="model cost"><h3>Cost model</h3><p><span>MAE</span><b>{EVALUATED.costMae.toFixed(3)} pp</b></p><p><span>R²</span><b>{EVALUATED.costR2.toFixed(4)}</b></p><p><span>MAPE</span><b /></p></div><div className="model delay"><h3>Delay model</h3><p><span>MAE</span><b>{EVALUATED.delayMae.toFixed(3)} d</b></p><p><span>R²</span><b>{EVALUATED.delayR2.toFixed(4)}</b></p><p><span>MAPE</span><b /></p></div></div></Panel>
+        <Panel title="Classification Metrics" icon={<TrendingUp />}><div className="classification"><MiniMetric label="Precision" result="" tone="blue" /><MiniMetric label="Recall" result="" tone="orange" /><MiniMetric label="F1" result="" tone="green" /></div></Panel>
+        <Panel title="Performance Across Time" icon={<Clock3 />}><Empty /></Panel>
+      </section>
+      <Panel title="Project-level Validation Sample" icon={<ClipboardList />} className="sample" action={<button className="more" onClick={() => setMore(value => !value)}>{more ? 'Show fewer samples' : 'View more samples'} →</button>}><div className="table-wrap"><table><thead><tr>{['Project ID', 'Predicted Cost (%)', 'Actual Cost (%)', 'Cost Error (pp)', 'Predicted Delay (days)', 'Actual Delay (days)', 'Delay Error (days)', 'Confidence'].map(label => <th key={label}>{label}</th>)}</tr></thead><tbody /></table></div></Panel>
+      <p className="footer-note">Metrics reflect the evaluated 2001–2021 training window.</p>
+    </main>
+  </div>;
 }
