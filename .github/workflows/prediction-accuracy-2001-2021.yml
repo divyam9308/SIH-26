@@ -11,6 +11,10 @@ on:
       - 'backend/app/ml/**'
       - 'backend/app/services/lifecycle_retraining_service.py'
 
+concurrency:
+  group: prediction-accuracy-2001-2021-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
