@@ -8,20 +8,28 @@ cost predictions remain untouched.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 
 import backend.app.ml.experiments.post_exp113_delay_common as _common
+from backend.app.ml.experiments.nextgen_common import _prepare, normalize_taxonomy
 from backend.app.ml.production_exp105_exp113_fast import (
     train_window_with_promoted_cost_and_delay as _fast_train_current_production,
 )
 from backend.app.ml.experiments.post_exp113_delay_common import (
+    _production_oof_fold,
     fit_residual,
+    forward_folds,
     persist,
     prepare_context,
     production_oof,
 )
+from backend.app.ml.monthly_lifecycle import build_training_dataset
+from backend.app.ml.monthly_training import temporal_project_split
+from backend.app.ml.production_exp61_baseline import _build_temporal_delay_priors
 
 # Branch-local execution substitution only: the fast wrapper calls the exact
 # canonical Exp105+Exp113 trainer while parallelizing independent internal OOF
@@ -30,6 +38,7 @@ _common.train_current_production = _fast_train_current_production
 
 EXPERIMENT_ID = "exp126"
 NAME = "Reporting Cadence and Data-Quality Behavior (Aditya PR #19 port)"
+OOF_YEARS = (2016, 2017, 2018, 2019, 2020, 2021)
 FEATURES = [
     "is_report_gap_days",
     "is_report_gap_mean3",
@@ -116,9 +125,90 @@ def add_reporting_behavior_features(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def fit_experiment(end: int, output: str):
+def _training_context_2021():
+    data, identity = build_training_dataset()
+    prepared = normalize_taxonomy(_prepare(data))
+    train, test = temporal_project_split(prepared, 2001, 2021, 2025)
+    train, _, _ = _build_temporal_delay_priors(train, test)
+    return {"full_data": data, "identity": identity, "train": train}
+
+
+def _selected_oof_folds(train, max_folds=6):
+    return {
+        int(year): validation
+        for _, validation, year in forward_folds(train, max_folds)
+        if int(year) - 1 >= 2005
+    }
+
+
+def build_oof_fold(year: int, output: str):
+    """Build one exact strict-forward production OOF fold for CI sharding."""
+    ctx = _training_context_2021()
+    folds = _selected_oof_folds(ctx["train"], max_folds=6)
+    if int(year) not in folds:
+        raise ValueError(f"OOF year {year} not selected; expected {sorted(folds)}")
+    part = _production_oof_fold(
+        folds[int(year)], int(year), ctx["full_data"], ctx["identity"]
+    )
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(part, path, compress=3)
+    print(f"EXP126_PRODUCTION_OOF_FOLD_COMPLETED={year}; rows={len(part)}", flush=True)
+    return path
+
+
+def load_oof_dir(directory: str | Path, expected=OOF_YEARS):
+    paths = sorted(Path(directory).glob("delay-oof-*.pkl"))
+    if not paths:
+        raise FileNotFoundError(f"No Exp126 Delay OOF artifacts in {directory}")
+    parts = [joblib.load(path) for path in paths]
+    years = [int(pd.to_numeric(part["oof_year"], errors="raise").iloc[0]) for part in parts]
+    if tuple(sorted(years)) != tuple(expected):
+        raise ValueError(f"OOF years {sorted(years)} != {list(expected)}")
+    if len(set(years)) != len(years):
+        raise ValueError("Duplicate Exp126 OOF year artifacts")
+    return pd.concat(parts, ignore_index=True).sort_values(
+        ["oof_year", "canonical_project_id", "snapshot_date"], kind="mergesort"
+    ).reset_index(drop=True)
+
+
+def _validate_precomputed_oof(oof: pd.DataFrame, train: pd.DataFrame):
+    folds = _selected_oof_folds(train, max_folds=6)
+    years = sorted(int(value) for value in pd.to_numeric(oof["oof_year"], errors="raise").unique())
+    if tuple(years) != tuple(OOF_YEARS):
+        raise ValueError(f"Precomputed OOF years {years} != {list(OOF_YEARS)}")
+    if tuple(sorted(folds)) != tuple(OOF_YEARS):
+        raise ValueError(f"Current training frame selected OOF years {sorted(folds)} != {list(OOF_YEARS)}")
+    for year in OOF_YEARS:
+        expected = folds[year]
+        actual = oof.loc[pd.to_numeric(oof["oof_year"], errors="coerce") == year]
+        if len(actual) != len(expected):
+            raise ValueError(f"OOF {year} row count {len(actual)} != expected {len(expected)}")
+        expected_keys = set(
+            zip(
+                expected["canonical_project_id"].astype(str),
+                pd.to_datetime(expected["snapshot_date"], errors="coerce").astype(str),
+            )
+        )
+        actual_keys = set(
+            zip(
+                actual["canonical_project_id"].astype(str),
+                pd.to_datetime(actual["snapshot_date"], errors="coerce").astype(str),
+            )
+        )
+        if actual_keys != expected_keys:
+            raise ValueError(f"OOF {year} row identity mismatch")
+    return oof.copy()
+
+
+def fit_experiment(end: int, output: str, precomputed_oof: pd.DataFrame | None = None):
     context = prepare_context(end)
-    oof = production_oof(context)
+    if precomputed_oof is None:
+        oof = production_oof(context)
+    else:
+        if end != 2021:
+            raise ValueError("Precomputed Exp126 OOF shards are defined only for the 2001-2021 audit")
+        oof = _validate_precomputed_oof(precomputed_oof, context["train"])
     score = context["cohort"].copy()
     score["production_prediction"] = context["production_delay"]
 
@@ -139,6 +229,8 @@ def fit_experiment(end: int, output: str):
             "adaptation": "delay-only; current post-Exp113 production/OOF harness",
             "causal_as_of_features_only": True,
             "canonical_training_execution": "performance wrapper only; model logic unchanged",
+            "oof_years": list(OOF_YEARS) if precomputed_oof is not None else None,
+            "oof_execution": "precomputed strict-forward shards" if precomputed_oof is not None else "in-process",
         }
     )
     return persist(
