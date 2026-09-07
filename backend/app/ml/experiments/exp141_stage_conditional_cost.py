@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
 from backend.app.ml import production_exp105_exp113_baseline as prod
 from backend.app.ml.experiments.nextgen_common import _prepare, normalize_taxonomy
-from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights, build_training_dataset
+from backend.app.ml.monthly_lifecycle import assign_project_balanced_weights
 from backend.app.ml.monthly_training import (
     _json_safe,
     _regression_metrics,
@@ -232,61 +233,71 @@ def _fit_stage_conditional_residual_layer(
     }
 
 
-def fit_experiment(
-    training_start: int = 2001,
-    training_end: int = 2022,
-    test_end: int = 2025,
-    output: str | None = None,
-    data: pd.DataFrame | None = None,
+def train_window_with_exp141(
+    training_start: int,
+    training_end: int,
+    test_end: int,
+    *,
+    data: pd.DataFrame,
     identity: pd.DataFrame | None = None,
+    artifact_root: Path,
 ) -> dict:
-    if data is None or identity is None:
-        data, identity = build_training_dataset()
+    root = Path(artifact_root)
+    result = prod.train_window_with_promoted_cost_and_delay(
+        training_start,
+        training_end,
+        test_end,
+        data=data,
+        identity=identity,
+        artifact_root=root,
+        verify_frozen_reference=False,
+    )
+    target = root / f"{training_start}_{training_end}"
+    current_cost_model = joblib.load(target / "cost_model.pkl")
+    anchor_model = current_cost_model.base_model if hasattr(current_cost_model, "base_model") else current_cost_model
 
     prepared = normalize_taxonomy(_prepare(data))
     train, test = temporal_project_split(prepared, training_start, training_end, test_end)
-    train, test, _ = _build_temporal_delay_priors(train, test)
-
-    eval_rows = _production_cost_evaluation_rows(test).copy()
-    eval_ids = _select_aft_calibration_projects(
-        eval_rows, limit=_aft_routing_limit(training_start, training_end, test_end)
+    prior_train, prior_test, _ = _build_temporal_delay_priors(train, test)
+    cohort = _production_cost_evaluation_rows(prior_test).copy()
+    calibration_ids = _select_aft_calibration_projects(
+        cohort,
+        limit=_aft_routing_limit(training_start, training_end, test_end),
     )
-    eval_rows[CALIBRATION_GATE_FEATURE] = eval_rows["canonical_project_id"].astype("string").isin(eval_ids)
-    score = assign_project_balanced_weights(eval_rows)
+    cohort[CALIBRATION_GATE_FEATURE] = cohort["canonical_project_id"].astype("string").isin(calibration_ids)
+    cohort = assign_project_balanced_weights(cohort)
 
-    oof_result = prod._generate_cost_and_delay_oof(
-        training_start, training_end, data, identity
-    )
-    cost_oof = oof_result["cost_oof"].copy()
-    anchor_model = prod._fit_production_cost_anchor(train)
-    anchor_score_pred = anchor_model.predict(score)
-    score["production_prediction"] = anchor_score_pred
+    oof = prod._current_cost_oof(prior_train, anchor_model)
+    anchor_prediction = np.asarray(anchor_model.predict(cohort), dtype=float)
+    production_prediction = np.asarray(current_cost_model.predict(cohort), dtype=float)
 
-    correction, details = _fit_stage_conditional_residual_layer(cost_oof, score)
-    production = np.asarray(anchor_score_pred, dtype=float)
-    experiment = production + correction
+    cohort_work = cohort.copy()
+    cohort_work["production_prediction"] = anchor_prediction
+
+    correction, details = _fit_stage_conditional_residual_layer(oof, cohort_work)
+    exp141_prediction = anchor_prediction + correction
 
     prod_metrics = _regression_metrics(
-        score["actual_cost_overrun_percentage"],
-        production,
-        score["sample_weight"],
-        score["canonical_project_id"],
+        cohort["actual_cost_overrun_percentage"],
+        production_prediction,
+        cohort["sample_weight"],
+        cohort["canonical_project_id"],
     )
     exp_metrics = _regression_metrics(
-        score["actual_cost_overrun_percentage"],
-        experiment,
-        score["sample_weight"],
-        score["canonical_project_id"],
+        cohort["actual_cost_overrun_percentage"],
+        exp141_prediction,
+        cohort["sample_weight"],
+        cohort["canonical_project_id"],
     )
-    prod_stage = _stage_metrics(score, production)
-    exp_stage = _stage_metrics(score, experiment)
+    prod_stage = _stage_metrics(cohort, production_prediction)
+    exp_stage = _stage_metrics(cohort, exp141_prediction)
 
     success = (
         float(exp_metrics["MAE"]) <= float(prod_metrics["MAE"])
         and float(exp_metrics["RMSE"]) <= float(prod_metrics["RMSE"])
         and float(exp_metrics["R2"]) >= float(prod_metrics["R2"])
     )
-    result = {
+    payload = {
         "experiment_id": EXPERIMENT_ID,
         "experiment_name": EXPERIMENT_NAME,
         "scope": "cost",
@@ -306,9 +317,4 @@ def fit_experiment(
         "scientific_verdict": "PROMOTION CANDIDATE" if success else "DO NOT PROMOTE",
         "details": details,
     }
-
-    if output:
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(_json_safe(result), indent=2, allow_nan=False) + "\n")
-    return result
+    return {"production": result, "exp141": payload}
