@@ -10,7 +10,7 @@ import { getEarlyWarnings } from '../services/earlyWarningsService';
 import type { EarlyWarningsResponse, WarningStatus } from '../types/earlyWarnings';
 import './EarlyWarnings.css';
 
-const PAGE_SIZE = 7;
+const PAGE_SIZE = 15;
 const severities: Array<WarningStatus | 'All'> = ['All', 'New Escalation', 'Worsening', 'Persistent', 'Improving'];
 const severityLabel: Record<WarningStatus | 'All', string> = { All: 'All', 'New Escalation': 'New', Worsening: 'Worsening', Persistent: 'Persistent', Improving: 'Improving' };
 const snapshotLabel = (value: string) => new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`));
