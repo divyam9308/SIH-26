@@ -4,6 +4,7 @@ import { Projects } from '../pages/Projects';
 import { ProjectDetail } from '../pages/ProjectDetail';
 import { EarlyWarnings } from '../pages/EarlyWarnings';
 import { PredictionAccuracyPage } from '../pages/PredictionAccuracyPage';
+import { TrainingWindowPerformancePage } from '../pages/TrainingWindowPerformancePage';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 
 export function AppRoutes() {
@@ -13,6 +14,7 @@ export function AppRoutes() {
     <Route path="/projects/:projectId" element={<ProjectDetail />} />
     <Route path="/early-warnings" element={<EarlyWarnings />} />
     <Route path="/prediction-accuracy" element={<PredictionAccuracyPage />} />
+    <Route path="/model-comparison/training-window-performance" element={<TrainingWindowPerformancePage />} />
     <Route path="*" element={<Navigate to="/dashboard" replace />} />
   </Routes></DashboardLayout>;
 }

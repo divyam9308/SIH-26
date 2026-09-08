@@ -3,11 +3,12 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { AlertTriangle, ArrowLeft, IndianRupee, Radar } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../services/api';
-import { getProject, getProjectForecast, getProjectPeers } from '../services/projectService';
+import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers } from '../services/projectService';
 import { getEarlyWarnings } from '../services/earlyWarningsService';
-import type { ForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus } from '../types/api';
+import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, ExplanationSummary } from '../types/api';
 import type { EarlyWarningRow } from '../types/earlyWarnings';
 import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects';
+import { shapExplanationSubject, shapFeatureLabel } from '../lib/shapFeatureLabels';
 import '../styles/projects.css';
 import { SAVED_WINDOW_STORAGE_KEY } from '../components/dashboard/FilterBar';
 import { predictionActualRatio } from '../lib/predictionComparison';
@@ -20,20 +21,13 @@ const comparison = (predicted: number | null | undefined, actual: number | null 
   const ratio = predictionActualRatio(predicted, actual);
   return ratio === null ? 'Unavailable' : `${ratio.toFixed(1)}%`;
 };
-const featureLabels: Record<string, string> = {
-  approved_cost_cr: 'Approved project cost', revised_cost_cr: 'Revised project cost',
-  physical_progress: 'Physical progress', physical_progress_pct: 'Physical progress',
-  financial_progress: 'Financial progress', expenditure_ratio: 'Expenditure relative to approved cost',
-  duration_ratio: 'Elapsed time relative to planned duration', schedule_slippage_days: 'Existing schedule slippage',
-  cost_escalation_percentage: 'Recorded cost escalation', sector: 'Project sector', ministry: 'Line ministry',
-  implementing_agency: 'Implementing agency',
-};
-const featureLabel = (value: string) => featureLabels[value] ?? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const featureLabel = shapFeatureLabel;
 const isUsableFactors = (factors: ShapFactor[]) => factors.some((factor) => factor.direction !== 'not available' || factor.impact !== 0);
 const factorSentence = (factor: ShapFactor, target: 'cost' | 'delay' | 'risk', risk?: string | null) => {
-  if (target === 'risk') return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'pushed the model toward' : 'pushed the model away from'} the predicted ${risk ?? ''} risk category.`;
-  const prediction = target === 'cost' ? 'cost-overrun estimate' : 'delay prediction';
-  return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'increased' : 'reduced'} the model's predicted ${prediction}.`;
+  const subject = shapExplanationSubject(factor.feature);
+  if (target === 'risk') return `${subject} ${factor.impact >= 0 ? 'pushed the prediction toward' : 'pushed the prediction away from'} the ${risk ?? 'predicted'} risk category.`;
+  const prediction = target === 'cost' ? 'predicted cost overrun' : 'predicted delay';
+  return `${subject} ${factor.impact >= 0 ? 'increased' : 'reduced'} the ${prediction}.`;
 };
 
 function Field({ label, value, accent = '' }: { label: string; value: string; accent?: string }) {
@@ -44,28 +38,40 @@ function FactorList({ title, factors, status, tone, target = 'cost', risk }: { t
   if (!factors || !isUsableFactors(factors)) return <section className="risk-why-section"><h3>{title}</h3><p className="section-unavailable">{status?.reason ?? 'SHAP explanation unavailable for this model response.'}</p></section>;
   const sorted = [...factors].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
   const maximum = Math.max(...sorted.map((factor) => Math.abs(factor.impact)), 0.0001);
-  return <section className="risk-why-section"><h3>{title}</h3><ol className="factor-list">{sorted.map((factor, index) => <li key={`${factor.feature}-${index}`}><div className="factor-top"><span><b className="factor-index">{String(index + 1).padStart(2, '0')}</b> {featureLabel(factor.feature)}</span><span className="factor-weight">{factor.impact > 0 ? '+' : ''}{factor.impact.toFixed(4)}</span></div><div className="factor-track"><span className={`tone-${tone}`} style={{ width: `${Math.abs(factor.impact) / maximum * 100}%` }} /></div><p>{factorSentence(factor, target, risk)}</p></li>)}</ol></section>;
+  return <section className="risk-why-section"><h3>{title}</h3><div className="factor-axis" aria-label="Contribution direction: reductions left of zero, increases right of zero"><span>Reduces prediction</span><b>0</b><span>Increases prediction</span></div><ol className="factor-list">{sorted.map((factor, index) => { const width = Math.abs(factor.impact) / maximum * 50; const left = factor.impact < 0 ? 50 - width : 50; return <li key={`${factor.feature}-${index}`}><div className="factor-top"><span><b className="factor-index">{String(index + 1).padStart(2, '0')}</b> {featureLabel(factor.feature)}</span><span className="factor-weight">{factor.impact > 0 ? '+' : ''}{factor.impact.toFixed(4)}</span></div><div className="factor-track factor-track-centered"><i /><span className={`tone-${tone} ${factor.impact < 0 ? 'factor-bar-negative' : 'factor-bar-positive'}`} style={{ width: `${width}%`, left: `${left}%` }} /></div><p>{factorSentence(factor, target, risk)}</p></li>; })}</ol></section>;
+}
+
+const outputLabel = (summary: ExplanationSummary, target: 'cost' | 'delay' | 'risk') => summary.output === 'predicted_class_probability' ? `Predicted ${summary.predicted_class ?? 'selected'}-class probability` : target === 'cost' ? 'Predicted cost overrun' : 'Predicted delay';
+
+function PredictionDecomposition({ summary, target }: { summary?: ExplanationSummary | null; target: 'cost' | 'delay' | 'risk' }) {
+  if (!summary?.available || summary.base_value === null || summary.prediction === null || summary.net_feature_impact === null) return null;
+  const precision = target === 'risk' ? 4 : 2;
+  const number = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(precision)}`;
+  const riskNote = summary.output === 'predicted_class_probability' ? ' This is the frozen classifier output, separate from the headline calibrated delay-severity policy.' : '';
+  return <section className="prediction-decomposition" aria-label="Prediction decomposition"><div><span>Historical reference</span><b>{summary.base_value.toFixed(precision)}</b></div><div><span>Net project-specific impact</span><b>{number(summary.net_feature_impact)}</b></div><div><span>{outputLabel(summary, target)}</span><b>{summary.prediction.toFixed(precision)}</b></div>{Math.abs(summary.other_features_impact ?? 0) > 0.000001 && <p>Top displayed factors contribute {number(summary.displayed_factors_impact ?? 0)}; other model features contribute {number(summary.other_features_impact ?? 0)}.</p>}<details><summary>How calculated?</summary><p>{summary.reference_description} The baseline is a local model reference, not an approved cost or final outcome. Factor impacts add to the net project-specific impact; {outputLabel(summary, target).toLowerCase()} = baseline + net impact.{riskNote}</p></details></section>;
 }
 
 export function ProjectDetail() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
-  const selectedWindow = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY) ?? '2001_2017';
+  const selectedWindow = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY) ?? undefined;
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [peers, setPeers] = useState<PeerResponse | null>(null);
+  const [lifecycle, setLifecycle] = useState<LifecycleForecastResponse | null>(null);
   const [warnings, setWarnings] = useState<EarlyWarningRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [forecastStatus, setForecastStatus] = useState<string | null>(null);
   const [peerStatus, setPeerStatus] = useState<string | null>(null);
   const [warningStatus, setWarningStatus] = useState<string | null>(null);
+  const [lifecycleStatus, setLifecycleStatus] = useState<string | null>(null);
   const [shapTab, setShapTab] = useState<'cost' | 'delay' | 'risk'>('cost');
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setProject(null); setForecast(null); setPeers(null); setWarnings([]);
-    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setWarningStatus(null);
+    setLoading(true); setProject(null); setForecast(null); setPeers(null); setLifecycle(null); setWarnings([]);
+    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setWarningStatus(null); setLifecycleStatus(null);
     Promise.allSettled([
       getProject(projectId, controller.signal, selectedWindow), getProjectForecast(projectId, controller.signal, selectedWindow),
       getProjectPeers(projectId, controller.signal, selectedWindow), getEarlyWarnings({ projectId, window: '2001_2022' }, controller.signal),
@@ -76,6 +82,23 @@ export function ProjectDetail() {
       if (peersResult.status === 'fulfilled') setPeers(peersResult.value); else setPeerStatus(peersResult.reason instanceof Error ? peersResult.reason.message : 'Peer benchmark unavailable.');
       if (warningsResult.status === 'fulfilled') setWarnings(warningsResult.value.warnings); else setWarningStatus(warningsResult.reason instanceof Error ? warningsResult.reason.message : 'Warning events unavailable.');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    // The lifecycle artifact can need a moment to warm after a local backend restart.
+    // Retry only transport/server failures: a 404/409 remains an honest unavailable state.
+    const loadLifecycle = async (attempt = 0): Promise<void> => {
+      try {
+        const result = await getLifecycleForecast(projectId, controller.signal, selectedWindow);
+        if (!controller.signal.aborted) setLifecycle(result);
+      } catch (reason) {
+        if (controller.signal.aborted) return;
+        const retryable = reason instanceof ApiError && (reason.status === 0 || reason.status >= 500);
+        if (retryable && attempt < 2) {
+          window.setTimeout(() => { void loadLifecycle(attempt + 1); }, (attempt + 1) * 750);
+          return;
+        }
+        setLifecycleStatus(reason instanceof ApiError && [404, 409].includes(reason.status) ? 'Lifecycle history unavailable for this project.' : reason instanceof Error ? reason.message : 'Lifecycle history unavailable.');
+      }
+    };
+    void loadLifecycle();
     return () => controller.abort();
   }, [projectId, selectedWindow]);
 
@@ -95,9 +118,9 @@ export function ProjectDetail() {
   const chartGradient = `cost-fill-${project.project_code}`;
 
   const shapConfig = {
-    cost: { label: 'Cost', title: 'Cost SHAP factors', factors: forecast?.cost_factors, status: forecast?.cost_explanation_status },
-    delay: { label: 'Delay', title: 'Delay SHAP factors', factors: forecast?.delay_factors, status: forecast?.delay_explanation_status },
-    risk: { label: 'Risk', title: 'Risk SHAP factors', factors: forecast?.risk_factors, status: forecast?.risk_explanation_status },
+    cost: { label: 'Cost', title: 'Cost SHAP factors', factors: forecast?.cost_factors, status: forecast?.cost_explanation_status, summary: forecast?.cost_explanation_summary },
+    delay: { label: 'Delay', title: 'Delay SHAP factors', factors: forecast?.delay_factors, status: forecast?.delay_explanation_status, summary: forecast?.delay_explanation_summary },
+    risk: { label: 'Risk', title: 'Risk SHAP factors', factors: forecast?.risk_factors, status: forecast?.risk_explanation_status, summary: forecast?.risk_explanation_summary },
   }[shapTab];
 
   return <div className="projects-page project-detail">
@@ -113,11 +136,11 @@ export function ProjectDetail() {
 
     <ProjectPanel className="evidence-panel" title="Model Evidence" subtitle="Model Evidence · Local SHAP — project-level inputs that pushed each prediction higher or lower.">
       <div className="evidence-tabs" role="tablist">{(['cost', 'delay', 'risk'] as const).map((tab) => <button key={tab} role="tab" aria-selected={shapTab === tab} className={shapTab === tab ? 'active' : ''} onClick={() => setShapTab(tab)}>{shapConfig && tab === shapTab ? shapConfig.label : tab[0].toUpperCase() + tab.slice(1)}</button>)}</div>
-      <div className="evidence-body"><FactorList title={shapConfig.title} factors={shapConfig.factors} status={shapConfig.status} tone={tone} target={shapTab} risk={category} /></div>
+      <div className="evidence-body"><PredictionDecomposition summary={shapConfig.summary} target={shapTab} /><FactorList title={shapConfig.title} factors={shapConfig.factors} status={shapConfig.status} tone={tone} target={shapTab} risk={shapTab === 'risk' ? shapConfig.summary?.predicted_class ?? category : category} /></div>
     </ProjectPanel>
 
     <ProjectPanel className="operational-panel" title="Operational Drivers" subtitle="Observed warning signals derived directly from available PAIMANA project records.">
-      <div className="operational-panel-body">{forecast?.operational_drivers.length ? <ul className="operational-driver-list">{forecast.operational_drivers.map((driver) => <li key={driver.type}><div className="factor-top"><b>{driver.label}</b><span className="factor-weight">Observed signal</span></div><p>{driver.evidence}</p></li>)}</ul> : <p className="section-unavailable">No verified operational drivers were available for this project snapshot.</p>}</div>
+      <div className="operational-panel-body">{forecast?.operational_drivers.length ? <ul className="operational-driver-list">{forecast.operational_drivers.map((driver) => <li key={driver.type}><div className="factor-top"><b>{driver.label}</b><span className="factor-weight">Observed signal</span></div><p>{driver.evidence}</p></li>)}</ul> : <p className="section-unavailable">No material operational warning signal was identified from the available PAIMANA records for this snapshot.</p>}</div>
     </ProjectPanel>
 
     <ProjectPanel className="future-integration" title="Future Integration — Administrative Cause Intelligence" subtitle="Potential future integration with additional authorised project-monitoring data." action={<span className="proposed-badge">Proposed</span>}>
@@ -131,6 +154,8 @@ export function ProjectDetail() {
       </ProjectPanel></div>
 
     <ProjectPanel className="why-risk" title="Project context"><div className="context-upper-grid"><section className="risk-why-section"><div className="factor-top"><h3>Peer Benchmark</h3><Radar size={16} color="var(--p-muted-foreground)" /></div>{peers ? <dl className="peer-metrics"><Field label="Comparable projects" value={String(peers.peer_count)} /><Field label="Median approved cost" value={inr(peers.medians.original_cost_cr)} /><Field label="Median cost escalation" value={peers.medians.cost_escalation_pct === null ? unavailable : `${peers.medians.cost_escalation_pct}%`} /><Field label="Median schedule extension" value={peers.medians.schedule_extension_days === null ? unavailable : `${peers.medians.schedule_extension_days} days`} /></dl> : <p className="section-unavailable">{peerStatus ?? 'Peer benchmark unavailable.'}</p>}</section>
-      <section className="risk-why-section"><h3>Early Warning Signals</h3>{warnings.length ? <ol className="project-warning-list">{warnings.map((warning) => <li key={`${warning.project_id}-${warning.snapshot_date}`}><div className="factor-top"><b>{warning.warning_status}</b><span className={`project-warning-severity ${warning.current_risk.level.toLowerCase()}`}>{warning.current_risk.level} · {warning.current_risk.score.toFixed(0)}/100</span></div><p>{warning.trigger}</p><dl className="project-warning-meta"><div><dt>Detected</dt><dd>{warningDate(warning.snapshot_date)}</dd></div><div><dt>First appeared</dt><dd>{warningDate(warning.first_appeared)}</dd></div><div><dt>Risk change</dt><dd>{warning.risk_change === null ? 'Not available' : `${warning.risk_change > 0 ? '+' : ''}${warning.risk_change.toFixed(1)} points`}</dd></div></dl></li>)}</ol> : <p className="section-unavailable">{warningStatus ?? 'No active early warning signals for this project.'}</p>}</section></div></ProjectPanel>
+      <section className="risk-why-section"><h3>Lifecycle Prediction</h3>{lifecycle ? <dl className="peer-metrics"><Field label="Lifecycle model" value={lifecycle.model_version} /><Field label="Official snapshots" value={String(lifecycle.history_snapshots)} /><Field label="Lifecycle risk" value={lifecycle.risk_level} /><Field label="Provenance" value={lifecycle.provenance.verified ? 'Verified' : 'Unverified'} /></dl> : <p className="section-unavailable">{lifecycleStatus ?? 'Lifecycle history unavailable.'}</p>}</section></div></ProjectPanel>
+
+    <ProjectPanel className="early-warning-panel" title="Early Warning Signals" subtitle="The same real warning records shown in the Active Warning Queue, matched by project code."><div className="early-warning-body">{warnings.length ? <ol className="project-warning-list">{warnings.map((warning) => <li key={`${warning.project_id}-${warning.snapshot_date}`}><div className="factor-top"><b>{warning.warning_status}</b><span className={`project-warning-severity ${warning.current_risk.level.toLowerCase()}`}>{warning.current_risk.level} · {warning.current_risk.score.toFixed(0)}/100</span></div><p>{warning.trigger}</p><dl className="project-warning-meta"><div><dt>Detected</dt><dd>{warningDate(warning.snapshot_date)}</dd></div><div><dt>First appeared</dt><dd>{warningDate(warning.first_appeared)}</dd></div><div><dt>Risk change</dt><dd>{warning.risk_change === null ? 'Not available' : `${warning.risk_change > 0 ? '+' : ''}${warning.risk_change.toFixed(1)} points`}</dd></div></dl></li>)}</ol> : <p className="section-unavailable">{warningStatus ?? 'No active early warning signals for this project.'}</p>}</div></ProjectPanel>
   </div>;
 }

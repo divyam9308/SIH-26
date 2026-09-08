@@ -48,6 +48,14 @@ def test_portfolio_uses_temporal_models():
     assert all(item["model_scope"] == "temporal cost and delay forecasting" for item in items)
 
 
+def test_historical_portfolio_risk_excludes_project_detail_payloads():
+    response = client.get("/api/portfolio/risk?limit=3&window=2001_2021")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 3
+    assert all("cost_factors" not in item and "cost_explanation_summary" not in item for item in items)
+
+
 def test_prediction_validation_artifacts_are_served():
     report = client.get("/api/models/validation")
     assert report.status_code == 200

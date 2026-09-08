@@ -71,4 +71,15 @@ def test_project_detail_keeps_model_evidence_and_renders_operational_drivers():
     assert "Future Integration — Administrative Cause Intelligence" in page
     assert "Conceptual future capability" in page
     assert "Land acquisition" in page
-    assert "No verified operational drivers were available" in page
+    assert "No material operational warning signal was identified" in page
+
+
+def test_feature_labels_cover_required_contract_and_have_deterministic_fallback():
+    labels = (Path(__file__).resolve().parents[1] / "frontend/src/lib/shapFeatureLabels.ts").read_text()
+    for feature in (
+        "duration_ratio", "schedule_slippage_days", "cost_escalation_percentage",
+        "expenditure_ratio", "progress_deviation", "physical_progress",
+        "approved_cost_cr", "planned_duration_days", "elapsed_duration_days",
+    ):
+        assert f"{feature}:" in labels
+    assert "feature.replace" in labels and "replaceAll('_', ' ')" in labels

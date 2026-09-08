@@ -1,4 +1,4 @@
-import { FolderKanban, LayoutDashboard, Target, TriangleAlert, X } from 'lucide-react';
+import { BarChart3, FolderKanban, LayoutDashboard, Target, TriangleAlert, X } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const nav = [
@@ -6,6 +6,7 @@ const nav = [
   ['/projects', 'Projects', FolderKanban],
   ['/early-warnings', 'Early Warnings', TriangleAlert],
   ['/prediction-accuracy', 'Prediction Accuracy', Target],
+  ['/model-comparison/training-window-performance', 'Training Window Performance', BarChart3],
 ] as const;
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {

@@ -1,0 +1,48 @@
+{
+  "model_version": "2001_2021",
+  "training_period": [
+    2001,
+    2021
+  ],
+  "testing_period": [
+    2022,
+    2025
+  ],
+  "policy": "One fixed 2001-2021 production model; metrics grouped by true completion year within the untouched 2022-2025 holdout.",
+  "status": "generated_from_canonical_prediction_validation",
+  "fold_count": 4,
+  "folds": [
+    {
+      "test_year": 2022,
+      "cost_MAE": 30.531,
+      "delay_MAE_days": 341.247,
+      "risk_f1": 0.3883,
+      "test_projects": 239,
+      "test_snapshots": 4473
+    },
+    {
+      "test_year": 2023,
+      "cost_MAE": 21.99,
+      "delay_MAE_days": 318.711,
+      "risk_f1": 0.4422,
+      "test_projects": 277,
+      "test_snapshots": 3872
+    },
+    {
+      "test_year": 2024,
+      "cost_MAE": 27.532,
+      "delay_MAE_days": 377.683,
+      "risk_f1": 0.4787,
+      "test_projects": 175,
+      "test_snapshots": 2622
+    },
+    {
+      "test_year": 2025,
+      "cost_MAE": 21.196,
+      "delay_MAE_days": 416.693,
+      "risk_f1": 0.4059,
+      "test_projects": 37,
+      "test_snapshots": 579
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from backend.app.services.portfolio_service import summary, portfolio_rows, supported_windows
+from backend.app.services.portfolio_service import summary, portfolio_risk_rows, supported_windows
 from backend.app.services.range_portfolio_service import RANGE_WINDOWS
 from backend.app.schemas import PortfolioRiskResponse, PortfolioSummaryResponse
 
@@ -19,7 +19,7 @@ def portfolio_risk(limit: int = 20, window: str | None = Query(None)):
     if window and window not in RANGE_WINDOWS:
         raise HTTPException(422, "Unsupported historical window")
     try:
-        rows = sorted(portfolio_rows(window), key=lambda x: x["priority_score"], reverse=True)
+        rows = sorted(portfolio_risk_rows(window), key=lambda x: x["priority_score"], reverse=True)
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     return {"items": rows[: max(1, min(limit, 100))]}

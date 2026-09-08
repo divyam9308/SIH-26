@@ -12,6 +12,7 @@ test-output/
 models/*.joblib
 models/monthly_lifecycle/**/*.pkl
 models/monthly_lifecycle/**/prediction_validation.csv
+models/monthly_lifecycle/**/*.lock
 # Reproducible generated dataset outputs
 data/raw/*.csv
 data/processed/*.csv
