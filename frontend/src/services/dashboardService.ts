@@ -1,6 +1,7 @@
 import { apiGet } from './api';
 import type { DashboardData } from '../types/dashboard';
 import type { PortfolioRiskItem, PortfolioSummaryResponse } from '../types/api';
+import { getDataRangeLabel } from '../lib/trainingWindows';
 
 const inr = (value: number) => `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 }).format(value)} Cr`;
 
@@ -16,13 +17,12 @@ export async function getDashboardData(window = '2001_2017', signal?: AbortSigna
       { title: 'TOTAL PROJECTS', value: summary.projects.toLocaleString('en-IN'), change: `${summary.sectors} reported sectors`, tone: 'blue' },
       { title: 'HIGH / CRITICAL PROJECTS', value: highCritical.toLocaleString('en-IN'), change: 'Production risk classification', tone: 'red' },
       { title: 'PREDICTED COST EXPOSURE', value: inr(summary.predicted_cost_exposure_cr), change: 'Positive predicted overruns only', tone: 'orange' },
-      { title: 'CURRENT EXPENDITURE', value: inr(summary.expenditure_cr), change: `Snapshot ${summary.dataset_snapshot ?? 'Unavailable'}`, tone: 'blue' },
+      { title: 'CURRENT EXPENDITURE', value: inr(summary.expenditure_cr), change: `Data Range ${getDataRangeLabel(window)}`, tone: 'blue' },
     ],
     projects: risk.items.map((item, index) => ({
       id: String(index + 1), code: item.project_code, name: item.project_name, sector: item.sector, riskLevel: item.risk_level,
       riskScore: item.risk_score, costRisk: item.predicted_cost_overrun_percentage,
-      scheduleRisk: item.predicted_delay_months, progress: item.physical_progress_pct,
-      warning: item.confidence_calibration_status.replaceAll('_', ' '),
+      scheduleRiskDays: item.predicted_delay_days, progress: item.physical_progress_pct,
     })),
     riskDistribution: (['Critical', 'High', 'Medium', 'Low'] as const).map((name) => ({ name, value: summary.risk_distribution[name.toLowerCase() as keyof typeof summary.risk_distribution], color: colors[name] })),
     totalProjects: summary.projects,

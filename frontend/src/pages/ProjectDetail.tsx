@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { AlertTriangle, ArrowLeft, Clock, IndianRupee, Radar, TrendingUp } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, IndianRupee, Radar } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../services/api';
-import { getLifecycleForecast, getProject, getProjectForecast, getProjectPeers, getProjectWarnings } from '../services/projectService';
-import type { ForecastResponse, LifecycleForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus, WarningResponse } from '../types/api';
+import { getProject, getProjectForecast, getProjectPeers } from '../services/projectService';
+import { getEarlyWarnings } from '../services/earlyWarningsService';
+import type { ForecastResponse, PeerResponse, ProjectRecord, ShapFactor, CapabilityStatus } from '../types/api';
+import type { EarlyWarningRow } from '../types/earlyWarnings';
 import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects';
 import '../styles/projects.css';
 import { SAVED_WINDOW_STORAGE_KEY } from '../components/dashboard/FilterBar';
+import { predictionActualRatio } from '../lib/predictionComparison';
 
 const unavailable = 'Not reported';
-const formatDate = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : unavailable;
+const percentage = (value: number | null | undefined) => value == null ? 'Unavailable' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+const days = (value: number | null | undefined) => value == null ? 'Unavailable' : `${value.toFixed(0)} days`;
+const warningDate = (value: string | null) => value ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) : 'Not reported';
+const comparison = (predicted: number | null | undefined, actual: number | null | undefined) => {
+  const ratio = predictionActualRatio(predicted, actual);
+  return ratio === null ? 'Unavailable' : `${ratio.toFixed(1)}%`;
+};
 const featureLabels: Record<string, string> = {
   approved_cost_cr: 'Approved project cost', revised_cost_cr: 'Revised project cost',
   physical_progress: 'Physical progress', physical_progress_pct: 'Physical progress',
@@ -22,7 +31,6 @@ const featureLabels: Record<string, string> = {
 const featureLabel = (value: string) => featureLabels[value] ?? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const isUsableFactors = (factors: ShapFactor[]) => factors.some((factor) => factor.direction !== 'not available' || factor.impact !== 0);
 const factorSentence = (factor: ShapFactor, target: 'cost' | 'delay' | 'risk', risk?: string | null) => {
-  const label = featureLabel(factor.feature).toLowerCase();
   if (target === 'risk') return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'pushed the model toward' : 'pushed the model away from'} the predicted ${risk ?? ''} risk category.`;
   const prediction = target === 'cost' ? 'cost-overrun estimate' : 'delay prediction';
   return `${featureLabel(factor.feature)} ${factor.impact >= 0 ? 'increased' : 'reduced'} the model's predicted ${prediction}.`;
@@ -42,51 +50,32 @@ function FactorList({ title, factors, status, tone, target = 'cost', risk }: { t
 export function ProjectDetail() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
-  const selectedWindow = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY) ?? undefined;
+  const selectedWindow = globalThis.localStorage?.getItem(SAVED_WINDOW_STORAGE_KEY) ?? '2001_2017';
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [peers, setPeers] = useState<PeerResponse | null>(null);
-  const [lifecycle, setLifecycle] = useState<LifecycleForecastResponse | null>(null);
-  const [warnings, setWarnings] = useState<WarningResponse | null>(null);
+  const [warnings, setWarnings] = useState<EarlyWarningRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [forecastStatus, setForecastStatus] = useState<string | null>(null);
   const [peerStatus, setPeerStatus] = useState<string | null>(null);
   const [warningStatus, setWarningStatus] = useState<string | null>(null);
-  const [lifecycleStatus, setLifecycleStatus] = useState<string | null>(null);
   const [shapTab, setShapTab] = useState<'cost' | 'delay' | 'risk'>('cost');
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setProject(null); setForecast(null); setPeers(null); setLifecycle(null); setWarnings(null);
-    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setWarningStatus(null); setLifecycleStatus(null);
+    setLoading(true); setProject(null); setForecast(null); setPeers(null); setWarnings([]);
+    setProjectError(null); setForecastStatus(null); setPeerStatus(null); setWarningStatus(null);
     Promise.allSettled([
       getProject(projectId, controller.signal, selectedWindow), getProjectForecast(projectId, controller.signal, selectedWindow),
-      getProjectPeers(projectId, controller.signal, selectedWindow), getProjectWarnings(projectId, controller.signal, selectedWindow),
+      getProjectPeers(projectId, controller.signal, selectedWindow), getEarlyWarnings({ projectId, window: '2001_2022' }, controller.signal),
     ]).then(([projectResult, forecastResult, peersResult, warningsResult]) => {
       if (controller.signal.aborted) return;
       if (projectResult.status === 'fulfilled') setProject(projectResult.value); else setProjectError(projectResult.reason instanceof Error ? projectResult.reason.message : 'Project unavailable.');
       if (forecastResult.status === 'fulfilled') setForecast(forecastResult.value); else setForecastStatus(forecastResult.reason instanceof ApiError && forecastResult.reason.status === 409 ? `Prediction unavailable: ${forecastResult.reason.message}` : forecastResult.reason instanceof Error ? forecastResult.reason.message : 'Prediction unavailable.');
       if (peersResult.status === 'fulfilled') setPeers(peersResult.value); else setPeerStatus(peersResult.reason instanceof Error ? peersResult.reason.message : 'Peer benchmark unavailable.');
-      if (warningsResult.status === 'fulfilled') setWarnings(warningsResult.value); else setWarningStatus(warningsResult.reason instanceof Error ? warningsResult.reason.message : 'Warning events unavailable.');
+      if (warningsResult.status === 'fulfilled') setWarnings(warningsResult.value.warnings); else setWarningStatus(warningsResult.reason instanceof Error ? warningsResult.reason.message : 'Warning events unavailable.');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    // The lifecycle artifact can need a moment to warm after a local backend restart.
-    // Retry only transport/server failures: a 404/409 remains an honest unavailable state.
-    const loadLifecycle = async (attempt = 0): Promise<void> => {
-      try {
-        const result = await getLifecycleForecast(projectId, controller.signal, selectedWindow);
-        if (!controller.signal.aborted) setLifecycle(result);
-      } catch (reason) {
-        if (controller.signal.aborted) return;
-        const retryable = reason instanceof ApiError && (reason.status === 0 || reason.status >= 500);
-        if (retryable && attempt < 2) {
-          window.setTimeout(() => { void loadLifecycle(attempt + 1); }, (attempt + 1) * 750);
-          return;
-        }
-        setLifecycleStatus(reason instanceof ApiError && [404, 409].includes(reason.status) ? 'Lifecycle history unavailable for this project.' : reason instanceof Error ? reason.message : 'Lifecycle history unavailable.');
-      }
-    };
-    void loadLifecycle();
     return () => controller.abort();
   }, [projectId, selectedWindow]);
 
@@ -104,8 +93,6 @@ export function ProjectDetail() {
   const tone = category ? riskClass(category) : 'medium';
   const hasRiskProbability = forecast?.risk_probability_percentage !== null && forecast?.risk_probability_percentage !== undefined;
   const chartGradient = `cost-fill-${project.project_code}`;
-  const progress = project.physical_progress_pct;
-  const financialProgress = project.financial_progress_pct;
 
   const shapConfig = {
     cost: { label: 'Cost', title: 'Cost SHAP factors', factors: forecast?.cost_factors, status: forecast?.cost_explanation_status },
@@ -115,13 +102,13 @@ export function ProjectDetail() {
 
   return <div className="projects-page project-detail">
     <button className="back-to-register" onClick={() => navigate('/projects')}><ArrowLeft size={14} /> Back to risk register</button>
-    <section className="detail-hero compact-project-header"><div><p className="projects-eyebrow">Project Intelligence</p><h1>{project.project_name}</h1><p className="detail-meta">{project.project_code} · {project.sector} · {project.implementing_agency ?? unavailable}</p><p className="detail-provenance">Dataset {project.snapshot_date} · Model {forecast?.model_version ?? 'Unavailable'} · Inference {forecast ? new Date(forecast.inference_timestamp).toLocaleString('en-IN') : 'Unavailable'}</p></div></section>
+    <section className="detail-hero compact-project-header"><div><p className="projects-eyebrow">Project Intelligence</p><h1>{project.project_name}</h1><p className="detail-meta">{project.project_code} · {project.sector} · {project.implementing_agency ?? unavailable}</p></div></section>
     {forecastStatus && <div className="partial-data-banner"><AlertTriangle size={16} />{forecastStatus}. Project information remains available.</div>}
 
     <section className="prediction-summary" aria-label="Executive prediction summary">
-      <article className="prediction-card"><p>Predicted Cost Overrun</p><strong className={tone}>{forecast ? `${forecast.predicted_cost_overrun_percentage > 0 ? '+' : ''}${forecast.predicted_cost_overrun_percentage.toFixed(1)}%` : 'Unavailable'}</strong><span>{forecast ? `${inr(forecast.predicted_cost_overrun_amount_cr)} estimated overrun` : unavailable}</span>{forecast && <small>Predicted final cost {inr(forecast.predicted_final_cost_cr)}</small>}</article>
-      <article className="prediction-card"><p>Predicted Time Overrun</p><strong className={tone}>{forecast ? `${forecast.predicted_delay_months.toFixed(1)} months` : 'Unavailable'}</strong><span>{forecast ? `${forecast.predicted_delay_days.toFixed(0)} days` : unavailable}</span>{forecast?.predicted_completion_date && <small>Predicted completion {formatDate(forecast.predicted_completion_date)}</small>}</article>
-      <article className="prediction-card"><p>Overall Risk</p>{category ? <RiskChip level={category} /> : <strong>Unavailable</strong>}<span>{forecast ? `${hasRiskProbability ? 'Implementation risk score' : 'Calibrated risk severity'} ${forecast.risk_score.toFixed(1)}/100` : unavailable}</span><small>{hasRiskProbability ? 'Risk probability is reported separately.' : 'Severity is not classifier confidence.'}</small></article>
+      <article className="prediction-card prediction-comparison-card"><p>Cost Overrun</p><div className="prediction-pair"><div><span>Predicted Cost Overrun</span><strong className={tone}>{percentage(forecast?.predicted_cost_overrun_percentage)}</strong></div><div><span>Actual Cost Overrun</span><strong>{percentage(project.cost_escalation_pct)}</strong></div></div><small>Prediction vs Actual: {comparison(forecast?.predicted_cost_overrun_percentage, project.cost_escalation_pct)}</small></article>
+      <article className="prediction-card prediction-comparison-card"><p>Time Overrun</p><div className="prediction-pair"><div><span>Predicted Time Overrun</span><strong className={tone}>{days(forecast?.predicted_delay_days)}</strong></div><div><span>Actual Time Overrun</span><strong>{days(project.schedule_extension_days)}</strong></div></div><small>Prediction vs Actual: {comparison(forecast?.predicted_delay_days, project.schedule_extension_days)}</small></article>
+      <article className="prediction-card"><p>Overall Risk</p>{category ? <RiskChip level={category} /> : <strong>Unavailable</strong>}<span>{forecast ? `${hasRiskProbability ? 'Implementation risk score' : 'Calibrated risk severity'} ${forecast.risk_score.toFixed(1)}/100` : unavailable}</span>{hasRiskProbability && <small>Risk probability {forecast.risk_probability_percentage.toFixed(1)}%</small>}</article>
     </section>
 
     <ProjectPanel className="evidence-panel" title="Model Evidence" subtitle="Model Evidence · Local SHAP — project-level inputs that pushed each prediction higher or lower.">
@@ -140,15 +127,10 @@ export function ProjectDetail() {
     <div className="detail-grid"><ProjectPanel title="Project Information" className="information"><dl className="detail-fields"><Field label="Project name" value={project.project_name} /><Field label="Project code" value={project.project_code} /><Field label="Sector" value={project.sector} /><Field label="Line ministry / department" value={project.ministry ?? unavailable} /><Field label="Implementing agency" value={project.implementing_agency ?? unavailable} /></dl></ProjectPanel>
       <ProjectPanel title="Cost Intelligence" subtitle="₹ crore" className="span-two" action={<IndianRupee size={16} color="var(--p-muted-foreground)" />}><dl className="detail-fields"><Field label="Original approved cost" value={inr(project.original_cost_cr)} /><Field label="Latest revised cost" value={inr(project.revised_cost_cr)} /><Field label="Cumulative expenditure" value={inr(project.expenditure_cr)} /><Field label="Predicted final cost" value={forecast ? inr(forecast.predicted_final_cost_cr) : 'Unavailable'} accent={forecast ? tone : ''} /><Field label="Predicted cost overrun" value={forecast ? `${inr(forecast.predicted_cost_overrun_amount_cr)} (${forecast.predicted_cost_overrun_percentage > 0 ? '+' : ''}${forecast.predicted_cost_overrun_percentage.toFixed(1)}%)` : 'Unavailable'} accent={forecast ? tone : ''} /></dl>
         <div className="detail-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={costSeries} margin={{ left: 8, right: 8, top: 8 }}><defs><linearGradient id={chartGradient} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--p-primary)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--p-primary)" stopOpacity={0.02} /></linearGradient></defs><CartesianGrid stroke="var(--p-border)" vertical={false} /><XAxis dataKey="stage" tick={{ fontSize: 11 }} stroke="var(--p-muted-foreground)" /><YAxis tick={{ fontSize: 11 }} stroke="var(--p-muted-foreground)" width={64} /><Tooltip formatter={(value) => [inr(Number(value)), 'Cost']} /><Area type="monotone" dataKey="value" stroke="var(--p-primary)" strokeWidth={2} fill={`url(#${chartGradient})`} /></AreaChart></ResponsiveContainer></div>
-        {forecast && <p className="range-note">{forecast.expected_range ? <>Expected cost overrun range: {forecast.expected_range.cost_overrun_percentage.p10}% to {forecast.expected_range.cost_overrun_percentage.p90}% · confidence {forecast.model_confidence_percentage === null ? 'Unavailable' : `${forecast.model_confidence_percentage}%`} · {forecast.confidence_calibration_status.replaceAll('_', ' ')}</> : 'Uncertainty interval unavailable for this prediction.'}</p>}
+        {forecast?.expected_range && <p className="range-note">Expected cost overrun range: {forecast.expected_range.cost_overrun_percentage.p10}% to {forecast.expected_range.cost_overrun_percentage.p90}% · confidence {forecast.model_confidence_percentage === null ? 'Unavailable' : `${forecast.model_confidence_percentage}%`} · {forecast.confidence_calibration_status.replaceAll('_', ' ')}</p>}
       </ProjectPanel></div>
 
-    <div className="detail-grid"><ProjectPanel title="Timeline Intelligence" className="span-two" action={<Clock size={16} color="var(--p-muted-foreground)" />}><dl className="detail-fields"><Field label="Project start" value={unavailable} /><Field label="Original completion" value={formatDate(project.original_end_date)} /><Field label="Latest revised completion" value={formatDate(project.revised_end_date)} /><Field label="Predicted completion" value={forecast ? formatDate(forecast.predicted_completion_date) : 'Unavailable'} accent={forecast ? tone : ''} /><Field label="Predicted time overrun" value={forecast ? `${forecast.predicted_delay_months.toFixed(1)} months` : 'Unavailable'} accent={forecast ? tone : ''} /></dl>{forecast?.expected_range && <p className="range-note">Expected delay range: {forecast.expected_range.delay_days.p10.toFixed(1)} to {forecast.expected_range.delay_days.p90.toFixed(1)} days.</p>}</ProjectPanel>
-      <ProjectPanel title="Progress & Risk" action={<TrendingUp size={16} color="var(--p-muted-foreground)" />}><div className="progress-content">{[["Physical progress", progress, 'primary'], ["Financial progress", financialProgress, 'financial'], [hasRiskProbability ? "Implementation risk score" : "Calibrated risk severity", forecast?.risk_score ?? null, tone]].map(([label, value, color]) => <div key={String(label)}><div className="progress-label"><span>{label}</span><b className={color === tone ? tone : ''}>{value === null ? unavailable : `${Number(value).toFixed(1)}%`}</b></div><div className="progress-track">{value !== null && <span className={`tone-${color}`} style={{ width: `${Math.max(0, Math.min(100, Number(value)))}%` }} />}</div></div>)}<p className="progress-note">Missing progress values are preserved as not reported; they are not converted to zero.</p></div></ProjectPanel></div>
-
-    <ProjectPanel className="why-risk" title="Additional project context"><div className="risk-why-grid"><section className="risk-why-section"><div className="factor-top"><h3>Peer benchmark</h3><Radar size={16} color="var(--p-muted-foreground)" /></div>{peers ? <dl className="peer-metrics"><Field label="Comparable projects" value={String(peers.peer_count)} /><Field label="Median approved cost" value={inr(peers.medians.original_cost_cr)} /><Field label="Median cost escalation" value={peers.medians.cost_escalation_pct === null ? unavailable : `${peers.medians.cost_escalation_pct}%`} /><Field label="Median schedule extension" value={peers.medians.schedule_extension_days === null ? unavailable : `${peers.medians.schedule_extension_days} days`} /></dl> : <p className="section-unavailable">{peerStatus ?? 'Peer benchmark unavailable.'}</p>}</section>
-      <section className="risk-why-section"><h3>Early warning signals</h3>{warnings?.available ? (warnings.items.length ? <ol className="factor-list">{warnings.items.map((warning) => <li key={`${warning.type}-${warning.date}`}><div className="factor-top"><span>{featureLabel(warning.type)}</span><span className="factor-weight">{warning.severity}</span></div><p>{warning.message}</p></li>)}</ol> : <p className="section-unavailable">No snapshot-change warning events occurred at this evaluation snapshot.</p>) : <p className="section-unavailable">{warnings?.reason ?? warningStatus ?? 'Warning events unavailable.'}</p>}</section>
-      <section className="risk-why-section"><h3>Lifecycle trajectory</h3>{lifecycle ? <dl className="peer-metrics"><Field label="Lifecycle model" value={lifecycle.model_version} /><Field label="Official snapshots" value={String(lifecycle.history_snapshots)} /><Field label="Lifecycle risk" value={lifecycle.risk_level} /><Field label="Provenance" value={lifecycle.provenance.verified ? 'Verified' : 'Unverified'} /></dl> : <p className="section-unavailable">{lifecycleStatus ?? 'Lifecycle history unavailable.'}</p>}</section>
-    </div></ProjectPanel>
+    <ProjectPanel className="why-risk" title="Project context"><div className="context-upper-grid"><section className="risk-why-section"><div className="factor-top"><h3>Peer Benchmark</h3><Radar size={16} color="var(--p-muted-foreground)" /></div>{peers ? <dl className="peer-metrics"><Field label="Comparable projects" value={String(peers.peer_count)} /><Field label="Median approved cost" value={inr(peers.medians.original_cost_cr)} /><Field label="Median cost escalation" value={peers.medians.cost_escalation_pct === null ? unavailable : `${peers.medians.cost_escalation_pct}%`} /><Field label="Median schedule extension" value={peers.medians.schedule_extension_days === null ? unavailable : `${peers.medians.schedule_extension_days} days`} /></dl> : <p className="section-unavailable">{peerStatus ?? 'Peer benchmark unavailable.'}</p>}</section>
+      <section className="risk-why-section"><h3>Early Warning Signals</h3>{warnings.length ? <ol className="project-warning-list">{warnings.map((warning) => <li key={`${warning.project_id}-${warning.snapshot_date}`}><div className="factor-top"><b>{warning.warning_status}</b><span className={`project-warning-severity ${warning.current_risk.level.toLowerCase()}`}>{warning.current_risk.level} · {warning.current_risk.score.toFixed(0)}/100</span></div><p>{warning.trigger}</p><dl className="project-warning-meta"><div><dt>Detected</dt><dd>{warningDate(warning.snapshot_date)}</dd></div><div><dt>First appeared</dt><dd>{warningDate(warning.first_appeared)}</dd></div><div><dt>Risk change</dt><dd>{warning.risk_change === null ? 'Not available' : `${warning.risk_change > 0 ? '+' : ''}${warning.risk_change.toFixed(1)} points`}</dd></div></dl></li>)}</ol> : <p className="section-unavailable">{warningStatus ?? 'No active early warning signals for this project.'}</p>}</section></div></ProjectPanel>
   </div>;
 }

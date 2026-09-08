@@ -1,1 +1,1 @@
-export { SystemStatus } from './Sidebar'
+export function SystemStatus() { return null; }

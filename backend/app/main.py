@@ -6,12 +6,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.core.config import APP_NAME, APP_VERSION, FRONTEND_DIR
-from backend.app.routes import assistant, data_quality, history, models, portfolio, projects, scenario, simulations
+from backend.app.routes import assistant, data_quality, early_warnings, history, models, portfolio, projects, scenario, simulations
 from backend.app.schemas import HealthResponse
 FRONTEND_BUILD_DIR = FRONTEND_DIR / "dist"
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 app.include_router(portfolio.router)
+app.include_router(early_warnings.router)
 app.include_router(projects.router)
 app.include_router(models.router)
 app.include_router(history.router)
