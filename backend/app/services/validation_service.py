@@ -132,6 +132,12 @@ def validation_rows(version: str | None = None) -> pd.DataFrame:
             if artifact.exists():
                 frame = pd.read_csv(artifact, dtype={"project_id": str, "canonical_project_id": str})
                 return _normalise_lifecycle_rows(frame) if family == "monthly_lifecycle" else frame
+        if family == "monthly_lifecycle" and selected not in _CANONICAL_LIFECYCLE_ONLY_WINDOWS:
+            from backend.app.services.range_portfolio_service import historical_validation_rows
+
+            frame = historical_validation_rows(selected)
+            if not frame.empty:
+                return frame
         if explicit:
             raise FileNotFoundError(f"Validation rows for requested model version {version} were not found.")
     return pd.read_csv(PROCESSED_DIR / "prediction_validation.csv", dtype={"project_id": str})
@@ -141,12 +147,17 @@ def validation_payload(limit: int = 100, version: str | None = None, completion_
     all_rows = validation_rows(version)
     if completion_year_start is not None or completion_year_end is not None:
         if "completion_year" not in all_rows:
-            raise ValueError("Prediction-validation evidence does not expose completion years.")
-        years = pd.to_numeric(all_rows["completion_year"], errors="coerce")
-        if completion_year_start is not None:
-            all_rows = all_rows.loc[years.ge(int(completion_year_start))]
-        if completion_year_end is not None:
-            all_rows = all_rows.loc[years.le(int(completion_year_end))]
+            testing_period = all_rows.attrs.get("testing_period") or []
+            requested_start = completion_year_start if completion_year_start is not None else testing_period[0] if testing_period else None
+            requested_end = completion_year_end if completion_year_end is not None else testing_period[-1] if testing_period else None
+            if len(testing_period) < 2 or [requested_start, requested_end] != [testing_period[0], testing_period[-1]]:
+                raise ValueError("Project-level validation evidence supports only its complete published holdout period.")
+        else:
+            years = pd.to_numeric(all_rows["completion_year"], errors="coerce")
+            if completion_year_start is not None:
+                all_rows = all_rows.loc[years.ge(int(completion_year_start))]
+            if completion_year_end is not None:
+                all_rows = all_rows.loc[years.le(int(completion_year_end))]
     metrics = None
     if completion_year_start is not None or completion_year_end is not None:
         required = {"actual_cost_overrun", "predicted_cost_overrun", "actual_delay_days", "predicted_delay_days", "sample_weight", "project_id"}
