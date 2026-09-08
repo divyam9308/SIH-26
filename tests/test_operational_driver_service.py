@@ -62,7 +62,7 @@ def test_ranking_is_deterministic_and_limited_to_five():
 
 
 def test_project_detail_keeps_model_evidence_and_renders_operational_drivers():
-    page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/ProjectDetail.tsx").read_text()
+    page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/ProjectDetail.tsx").read_text(encoding="utf-8")
     assert "Model Evidence" in page
     assert "Cost SHAP factors" in page
     assert "Delay SHAP factors" in page
@@ -75,7 +75,7 @@ def test_project_detail_keeps_model_evidence_and_renders_operational_drivers():
 
 
 def test_feature_labels_cover_required_contract_and_have_deterministic_fallback():
-    labels = (Path(__file__).resolve().parents[1] / "frontend/src/lib/shapFeatureLabels.ts").read_text()
+    labels = (Path(__file__).resolve().parents[1] / "frontend/src/lib/shapFeatureLabels.ts").read_text(encoding="utf-8")
     for feature in (
         "duration_ratio", "schedule_slippage_days", "cost_escalation_percentage",
         "expenditure_ratio", "progress_deviation", "physical_progress",
