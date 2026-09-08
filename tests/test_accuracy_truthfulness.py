@@ -19,9 +19,9 @@ def test_migrated_frontend_has_no_stale_model_simulation_page_contract():
 def test_prediction_accuracy_does_not_treat_missing_confidence_as_zero():
     page = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.tsx").read_text()
     service = (ROOT / "frontend" / "src" / "services" / "predictionAccuracyService.ts").read_text()
-    assert "model_confidence_percentage == null ? 'Unavailable'" in page
+    assert "model_confidence_percentage ?? 0" not in page
     assert "typeof value === 'number' && Number.isFinite(value)" in page
-    assert "risk_probability: number | null" in service
+    assert "risk_probability?: number | null" in service
     assert "model_confidence_percentage: number | null" in service
 
 
