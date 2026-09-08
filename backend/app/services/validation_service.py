@@ -136,8 +136,16 @@ def validation_rows(version: str | None = None) -> pd.DataFrame:
     return pd.read_csv(PROCESSED_DIR / "prediction_validation.csv", dtype={"project_id": str})
 
 
-def validation_payload(limit: int = 100, version: str | None = None) -> dict:
+def validation_payload(limit: int = 100, version: str | None = None, completion_year_start: int | None = None, completion_year_end: int | None = None) -> dict:
     all_rows = validation_rows(version)
+    if completion_year_start is not None or completion_year_end is not None:
+        if "completion_year" not in all_rows:
+            raise ValueError("Prediction-validation evidence does not expose completion years.")
+        years = pd.to_numeric(all_rows["completion_year"], errors="coerce")
+        if completion_year_start is not None:
+            all_rows = all_rows.loc[years.ge(int(completion_year_start))]
+        if completion_year_end is not None:
+            all_rows = all_rows.loc[years.le(int(completion_year_end))]
     frame = all_rows.head(max(1, min(limit, 500)))
     safe = frame.astype(object)
     safe = safe.where(~frame.isin([float("inf"), float("-inf")]), None)
