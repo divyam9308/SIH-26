@@ -1,0 +1,4 @@
+# Keep hash-verified production artifacts byte-identical across platforms.
+data/processed/portfolio_windows/*.json text eol=lf
+models/monthly_lifecycle/*/project_explanations.jsonl text eol=lf
+models/monthly_lifecycle/*/project_explanations.meta.json text eol=lf
