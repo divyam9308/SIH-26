@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 
 
 WINDOWS = (
-    {"start_year": 2001, "end_year": 2017, "cost_mae": 45.472, "delay_mae_days": 472.326, "cost_r2": 0.42},
-    {"start_year": 2001, "end_year": 2021, "cost_mae": 25.829, "delay_mae_days": 345.511, "cost_r2": 0.58},
-    {"start_year": 2001, "end_year": 2022, "cost_mae": 24.257, "delay_mae_days": 294.412, "cost_r2": 0.64},
+    {"start_year": 2001, "end_year": 2017, "cost_mae": 42.160, "delay_mae_days": 494.779, "cost_r2": 0.5301},
+    {"start_year": 2001, "end_year": 2021, "cost_mae": 24.266, "delay_mae_days": 343.592, "cost_r2": 0.7716},
+    {"start_year": 2001, "end_year": 2022, "cost_mae": 23.750, "delay_mae_days": 294.287, "cost_r2": 0.8256},
 )
 
 
