@@ -20,13 +20,14 @@ export interface ValidationRow {
 }
 export interface RollingFold { test_year: number; cost_MAE: number; delay_MAE_days: number; risk_f1?: number; test_projects?: number; test_snapshots?: number }
 export interface RollingValidation { model_version: string; folds: RollingFold[]; fold_count: number; policy?: string; status?: string; training_period?: number[]; testing_period?: number[] }
-export interface PredictionAccuracyData { report: ValidationReport; rows: ValidationRow[]; total: number; rolling: RollingValidation; }
+export interface PredictionAccuracyData { report: ValidationReport; rows: ValidationRow[]; samples: ValidationRow[]; total: number; rolling: RollingValidation; }
 
 export async function getPredictionAccuracyData(window: string, signal?: AbortSignal): Promise<PredictionAccuracyData> {
   const query = `?model_version=${encodeURIComponent(window)}`;
-  const [report, evidence, rolling] = await Promise.all([
+  const [report, evidence, samples, rolling] = await Promise.all([
     apiGet<ValidationReport>(`/api/models/validation${query}`, signal),
-    apiGet<{ model_version?: string; items: ValidationRow[]; total: number }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}&completion_year_start=2023&completion_year_end=2025`, signal),
+    apiGet<{ model_version?: string; items: ValidationRow[]; total: number; metrics?: { cost: ValidationReport['cost_model']; delay: ValidationReport['delay_model'] } }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}&completion_year_start=2022&completion_year_end=2025`, signal),
+    apiGet<{ items: ValidationRow[] }>(`/api/models/prediction-validation?limit=500&model_version=${encodeURIComponent(window)}&completion_year_start=2022&completion_year_end=2025&sort_by=absolute_cost_error`, signal),
     apiGet<RollingValidation>(`/api/models/rolling-validation${query}`, signal),
   ]);
 
@@ -36,12 +37,13 @@ export async function getPredictionAccuracyData(window: string, signal?: AbortSi
   if (!rolling.folds?.length || rolling.fold_count !== rolling.folds.length) {
     throw new Error(`Annual holdout metrics for ${window} are missing or incomplete.`);
   }
-  const visibleRolling = { ...rolling, folds: rolling.folds.filter((fold) => Number(fold.test_year) >= 2023) };
+  const visibleRolling = { ...rolling, folds: rolling.folds.filter((fold) => Number(fold.test_year) >= 2022 && Number(fold.test_year) <= 2025) };
   visibleRolling.fold_count = visibleRolling.folds.length;
   const years = visibleRolling.folds.map((fold) => Number(fold.test_year));
-  if (window === '2001_2021' && JSON.stringify(years) !== JSON.stringify([2023, 2024, 2025])) {
+  if (window === '2001_2021' && JSON.stringify(years) !== JSON.stringify([2022, 2023, 2024, 2025])) {
     throw new Error(`Expected 2022–2025 graph evidence for ${window}; received ${years.join(', ')}.`);
   }
 
-  return { report, rows: evidence.items, total: evidence.total, rolling: visibleRolling };
+  const filteredReport = evidence.metrics ? { ...report, cost_model: evidence.metrics.cost, delay_model: evidence.metrics.delay, metadata: { ...report.metadata, test_start: 2022, test_end: 2025, testing_samples: evidence.total } } : report;
+  return { report: filteredReport, rows: evidence.items, samples: samples.items, total: evidence.total, rolling: visibleRolling };
 }

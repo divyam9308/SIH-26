@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from backend.app.core.config import MODELS_DIR, PROCESSED_DIR
+from backend.app.ml.monthly_training import _regression_metrics
 from backend.app.ml.real_time_windows import active_version
 
 
@@ -136,7 +137,7 @@ def validation_rows(version: str | None = None) -> pd.DataFrame:
     return pd.read_csv(PROCESSED_DIR / "prediction_validation.csv", dtype={"project_id": str})
 
 
-def validation_payload(limit: int = 100, version: str | None = None, completion_year_start: int | None = None, completion_year_end: int | None = None) -> dict:
+def validation_payload(limit: int = 100, version: str | None = None, completion_year_start: int | None = None, completion_year_end: int | None = None, sort_by: str | None = None) -> dict:
     all_rows = validation_rows(version)
     if completion_year_start is not None or completion_year_end is not None:
         if "completion_year" not in all_rows:
@@ -146,11 +147,21 @@ def validation_payload(limit: int = 100, version: str | None = None, completion_
             all_rows = all_rows.loc[years.ge(int(completion_year_start))]
         if completion_year_end is not None:
             all_rows = all_rows.loc[years.le(int(completion_year_end))]
+    metrics = None
+    if completion_year_start is not None or completion_year_end is not None:
+        required = {"actual_cost_overrun", "predicted_cost_overrun", "actual_delay_days", "predicted_delay_days", "sample_weight", "project_id"}
+        if required.issubset(all_rows.columns) and not all_rows.empty:
+            metrics = {
+                "cost": _regression_metrics(all_rows["actual_cost_overrun"], all_rows["predicted_cost_overrun"].to_numpy(float), all_rows["sample_weight"], all_rows["project_id"]),
+                "delay": _regression_metrics(all_rows["actual_delay_days"], all_rows["predicted_delay_days"].to_numpy(float), all_rows["sample_weight"], all_rows["project_id"]),
+            }
+    if sort_by == "absolute_cost_error" and "cost_error" in all_rows:
+        all_rows = all_rows.assign(_absolute_cost_error=pd.to_numeric(all_rows["cost_error"], errors="coerce").abs()).sort_values("_absolute_cost_error", na_position="last").drop(columns="_absolute_cost_error")
     frame = all_rows.head(max(1, min(limit, 500)))
     safe = frame.astype(object)
     safe = safe.where(~frame.isin([float("inf"), float("-inf")]), None)
     safe = safe.where(pd.notna(safe), None)
-    return {"model_version": _version(version), "items": safe.to_dict(orient="records"), "total": int(len(all_rows))}
+    return {"model_version": _version(version), "items": safe.to_dict(orient="records"), "total": int(len(all_rows)), "metrics": metrics}
 
 
 def rolling_validation_report(version: str | None = None) -> dict:

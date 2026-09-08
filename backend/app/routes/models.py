@@ -69,10 +69,10 @@ def validation(model_version: str | None = None, model: str | None = None):
 
 
 @router.get("/prediction-validation")
-def prediction_validation(limit: int = 100, model_version: str | None = None, model: str | None = None, completion_year_start: int | None = None, completion_year_end: int | None = None):
+def prediction_validation(limit: int = 100, model_version: str | None = None, model: str | None = None, completion_year_start: int | None = None, completion_year_end: int | None = None, sort_by: str | None = None):
     selected = model_version or model
     try:
-        return validation_payload(limit, selected, completion_year_start, completion_year_end)
+        return validation_payload(limit, selected, completion_year_start, completion_year_end, sort_by)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(409, str(exc))
 
