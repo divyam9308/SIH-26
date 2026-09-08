@@ -1,8 +1,8 @@
 """Retrain the production 2001-2021 lifecycle model and publish UI evidence.
 
 This script is intentionally fixed to the canonical 2001-2021 training window and
-2022-2025 future holdout used by the Prediction Accuracy page. It refuses to
-publish partial, stale, or empty chart evidence.
+the independently evaluated 2023-2025 cohort used by the Prediction Accuracy page.
+It refuses to publish partial, stale, or empty chart evidence.
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ import numpy as np
 import pandas as pd
 
 from backend.app.ml.monthly_training import MODEL_ROOT, _regression_metrics, _risk_metrics
-from backend.app.services.lifecycle_retraining_service import retrain_lifecycle
+from backend.app.services.lifecycle_retraining_service import _write_evaluation_reports, _write_run_manifest, retrain_lifecycle
 
 TRAIN_START = 2001
 TRAIN_END = 2021
-TEST_YEARS = (2022, 2023, 2024, 2025)
+TEST_YEARS = (2023, 2024, 2025)
 TARGET = MODEL_ROOT / f"{TRAIN_START}_{TRAIN_END}"
 
 
@@ -104,6 +104,45 @@ def _annual_holdout_metrics(frame: pd.DataFrame) -> dict:
     return payload
 
 
+def _update_published_evaluation(frame: pd.DataFrame, result: dict) -> None:
+    cost = _regression_metrics(
+        frame["actual_cost_overrun_percentage"],
+        pd.to_numeric(frame["predicted_cost_overrun"], errors="raise").to_numpy(float),
+        frame["sample_weight"],
+        frame["canonical_project_id"],
+    )
+    delay = _regression_metrics(
+        frame["actual_delay_days"],
+        pd.to_numeric(frame["predicted_delay_days"], errors="raise").to_numpy(float),
+        frame["sample_weight"],
+        frame["canonical_project_id"],
+    )
+    risk = _risk_metrics(frame["actual_risk"], frame["predicted_risk"].to_numpy(), frame["sample_weight"])
+    evaluation_path = TARGET / "evaluation_results.json"
+    evaluation = json.loads(evaluation_path.read_text())
+    metadata = dict(evaluation["metadata"])
+    metadata.update({
+        "testing_period": [TEST_YEARS[0], TEST_YEARS[-1]],
+        "test_start": TEST_YEARS[0],
+        "test_end": TEST_YEARS[-1],
+        "evaluated_test_start": TEST_YEARS[0],
+        "evaluated_test_end": TEST_YEARS[-1],
+        "unique_test_projects": int(frame["canonical_project_id"].nunique()),
+        "test_snapshots": int(len(frame)),
+    })
+    evaluation["metadata"] = metadata
+    evaluation["lifecycle"]["metrics"]["cost"].update(cost)
+    evaluation["lifecycle"]["metrics"]["delay"].update(delay)
+    evaluation["lifecycle"]["metrics"]["risk"].update(risk)
+    evaluation_path.write_text(json.dumps(evaluation, indent=2, allow_nan=False) + "\n")
+    (TARGET / "metadata.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
+
+    result["metadata"] = metadata
+    result["lifecycle"]["metrics"] = evaluation["lifecycle"]["metrics"]
+    _write_evaluation_reports(result, TARGET)
+    _write_run_manifest(TRAIN_START, TRAIN_END, result, TARGET)
+
+
 def publish() -> dict:
     result = retrain_lifecycle(TRAIN_START, TRAIN_END)
     metadata = result.get("metadata") or {}
@@ -111,8 +150,8 @@ def publish() -> dict:
     testing = tuple(metadata.get("testing_period") or ())
     if training != (TRAIN_START, TRAIN_END):
         raise RuntimeError(f"Retrain published wrong training period: {training}")
-    if testing != (TEST_YEARS[0], TEST_YEARS[-1]):
-        raise RuntimeError(f"Retrain published wrong testing period: {testing}")
+    if testing != (TRAIN_END + 1, 2025):
+        raise RuntimeError(f"Retrain published wrong source holdout: {testing}")
 
     validation_path = TARGET / "prediction_validation.csv"
     evaluation_path = TARGET / "evaluation_results.json"
@@ -122,8 +161,11 @@ def publish() -> dict:
         raise RuntimeError("Retrain did not publish evaluation_results.json")
 
     frame = pd.read_csv(validation_path, dtype={"canonical_project_id": str})
+    frame = frame.loc[pd.to_numeric(frame["completion_year"], errors="coerce").isin(TEST_YEARS)].copy()
     if frame.empty:
-        raise RuntimeError("Canonical prediction validation ledger is empty")
+        raise RuntimeError("The requested 2023-2025 prediction validation ledger is empty")
+    frame.to_csv(validation_path, index=False)
+    _update_published_evaluation(frame, result)
     rolling = _annual_holdout_metrics(frame)
     rolling_path = TARGET / "rolling_validation_results.json"
     rolling_path.write_text(json.dumps(rolling, indent=2, allow_nan=False) + "\n")

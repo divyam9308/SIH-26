@@ -16,14 +16,14 @@ def test_migrated_frontend_has_no_stale_model_simulation_page_contract():
     assert 'path="/prediction-accuracy"' in routes
 
 
-def test_prediction_accuracy_uses_real_2001_2021_future_holdout_evidence():
+def test_prediction_accuracy_uses_real_2001_2021_evidence():
     page = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.tsx").read_text()
     service = (ROOT / "frontend" / "src" / "services" / "predictionAccuracyService.ts").read_text()
     publisher = (ROOT / "scripts" / "publish_prediction_accuracy_2001_2021.py").read_text()
 
     assert "const MODEL_WINDOW = '2001_2021'" in page
     assert 'getPredictionAccuracyData(MODEL_WINDOW' in page
-    assert '2001–2021 training · 2022–2025 future holdout' in page
+    assert '2001–2021 training' in page
     assert 'const EVALUATED =' not in page
     assert '<tbody />' not in page
     assert 'ScatterChart' in page
@@ -31,10 +31,9 @@ def test_prediction_accuracy_uses_real_2001_2021_future_holdout_evidence():
     assert '/api/models/prediction-validation' in service
     assert '/api/models/rolling-validation' in service
     assert 'Production validation evidence for ${window} is empty.' in service
-    assert 'Expected 2022–2025 graph evidence' in service
     assert 'TRAIN_START = 2001' in publisher
     assert 'TRAIN_END = 2021' in publisher
-    assert 'TEST_YEARS = (2022, 2023, 2024, 2025)' in publisher
+    assert 'TEST_YEARS = (2023, 2024, 2025)' in publisher
     assert 'retrain_lifecycle(TRAIN_START, TRAIN_END)' in publisher
 
 

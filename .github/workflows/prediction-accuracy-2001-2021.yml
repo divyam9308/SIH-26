@@ -42,7 +42,7 @@ jobs:
           cache: pip
       - name: Install Python dependencies
         run: pip install -r requirements-dev.txt
-      - name: Retrain production 2001-2021 and generate 2022-2025 graph evidence
+      - name: Retrain production 2001-2021 and generate 2023-2025 graph evidence
         env:
           PYTHONPATH: '${{ github.workspace }}'
         run: python scripts/publish_prediction_accuracy_2001_2021.py
@@ -59,13 +59,13 @@ jobs:
           rows = pd.read_csv(root / 'prediction_validation.csv')
 
           assert evaluation['metadata']['training_period'] == [2001, 2021]
-          assert evaluation['metadata']['testing_period'] == [2022, 2025]
+          assert evaluation['metadata']['testing_period'] == [2023, 2025]
           assert rolling['training_period'] == [2001, 2021]
-          assert rolling['testing_period'] == [2022, 2025]
-          assert [fold['test_year'] for fold in rolling['folds']] == [2022, 2023, 2024, 2025]
-          assert rolling['fold_count'] == 4
+          assert rolling['testing_period'] == [2023, 2025]
+          assert [fold['test_year'] for fold in rolling['folds']] == [2023, 2024, 2025]
+          assert rolling['fold_count'] == 3
           assert not rows.empty
-          assert sorted(rows['completion_year'].astype(int).unique().tolist()) == [2022, 2023, 2024, 2025]
+          assert sorted(rows['completion_year'].astype(int).unique().tolist()) == [2023, 2024, 2025]
           for column in ('predicted_cost_overrun', 'actual_cost_overrun_percentage', 'cost_error', 'predicted_delay_days', 'actual_delay_days', 'delay_error'):
               assert rows[column].notna().all(), column
           print(f'validated {len(rows)} holdout rows across {rows.canonical_project_id.nunique()} projects')
@@ -87,7 +87,7 @@ jobs:
           if git diff --cached --quiet; then
             echo 'Retrained evidence already matches the branch.'
           else
-            git commit -m 'data(accuracy): publish 2001-2021 retrain evidence for 2022-2025'
+            git commit -m 'data(accuracy): publish 2001-2021 retrain evidence for 2023-2025'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
       - uses: actions/upload-artifact@v4
