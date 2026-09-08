@@ -1,7 +1,14 @@
 name: Exp140 Cost canonical comparisons
+
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'backend/app/ml/experiments/exp140_uncertainty_cost.py'
+      - 'scripts/run_exp140_cost.py'
+      - 'tests/test_exp140_uncertainty_cost.py'
+      - '.github/workflows/exp140-cost-compare.yml'
+  workflow_dispatch:
 
 jobs:
   unit:
@@ -14,17 +21,23 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: python -m py_compile backend/app/ml/experiments/exp140_uncertainty_cost.py scripts/run_exp140_cost.py
-      - run: pytest tests/test_exp140_uncertainty_cost.py
+      - name: Syntax check
+        run: python -m py_compile backend/app/ml/experiments/exp140_uncertainty_cost.py scripts/run_exp140_cost.py
+      - name: Exp140 and production wrapper unit tests
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: pytest -q tests/test_exp140_uncertainty_cost.py tests/test_production_exp105_exp113.py
 
   compare:
     if: github.head_ref == 'experiment-140-uncertainty-cost'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         end: [2021, 2022]
+    env:
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,7 +48,10 @@ jobs:
       - name: Run Exp140 canonical comparison
         env:
           PYTHONPATH: '${{ github.workspace }}'
-        run: python scripts/run_exp140_cost.py --end ${{ matrix.end }} --output audit_outputs/exp140_2001_${{ matrix.end }}.json
+        run: >-
+          python scripts/run_exp140_cost.py
+          --end ${{ matrix.end }}
+          --output audit_outputs/exp140_2001_${{ matrix.end }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
