@@ -1,0 +1,102 @@
+name: Prediction Accuracy 2001-2021 evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/src/pages/PredictionAccuracyPage.tsx'
+      - 'frontend/src/services/predictionAccuracyService.ts'
+      - 'scripts/publish_prediction_accuracy_2001_2021.py'
+      - '.github/workflows/prediction-accuracy-2001-2021.yml'
+      - 'backend/app/ml/**'
+      - 'backend/app/services/lifecycle_retraining_service.py'
+
+concurrency:
+  group: prediction-accuracy-2001-2021-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  retrain-and-publish:
+    if: github.head_ref == 'feature/final-prediction-accuracy-ui-merge-ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUNBUFFERED: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      NUMEXPR_NUM_THREADS: '2'
+      LOKY_MAX_CPU_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Retrain production 2001-2021 and generate 2023-2025 graph evidence
+        env:
+          PYTHONPATH: '${{ github.workspace }}'
+        run: python scripts/publish_prediction_accuracy_2001_2021.py
+      - name: Verify graph evidence is complete and holdout-only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path('models/monthly_lifecycle/2001_2021')
+          evaluation = json.loads((root / 'evaluation_results.json').read_text())
+          rolling = json.loads((root / 'rolling_validation_results.json').read_text())
+          rows = pd.read_csv(root / 'prediction_validation.csv')
+
+          assert evaluation['metadata']['training_period'] == [2001, 2021]
+          assert evaluation['metadata']['testing_period'] == [2023, 2025]
+          assert rolling['training_period'] == [2001, 2021]
+          assert rolling['testing_period'] == [2023, 2025]
+          assert [fold['test_year'] for fold in rolling['folds']] == [2023, 2024, 2025]
+          assert rolling['fold_count'] == 3
+          assert not rows.empty
+          assert sorted(rows['completion_year'].astype(int).unique().tolist()) == [2023, 2024, 2025]
+          for column in ('predicted_cost_overrun', 'actual_cost_overrun_percentage', 'cost_error', 'predicted_delay_days', 'actual_delay_days', 'delay_error'):
+              assert rows[column].notna().all(), column
+          print(f'validated {len(rows)} holdout rows across {rows.canonical_project_id.nunique()} projects')
+          PY
+      - name: Publish retrained evidence into the PR branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            models/monthly_lifecycle/2001_2021/evaluation_results.json \
+            models/monthly_lifecycle/2001_2021/metadata.json \
+            models/monthly_lifecycle/2001_2021/feature_quality_report.json \
+            models/monthly_lifecycle/2001_2021/shap_importance.json \
+            models/monthly_lifecycle/2001_2021/prediction_validation.csv \
+            models/monthly_lifecycle/2001_2021/rolling_validation_results.json \
+            models/monthly_lifecycle/2001_2021/canonical_evaluation_report.json \
+            models/monthly_lifecycle/2001_2021/canonical_evaluation_report.md \
+            models/monthly_lifecycle/2001_2021/run_manifest.json
+          if git diff --cached --quiet; then
+            echo 'Retrained evidence already matches the branch.'
+          else
+            git commit -m 'data(accuracy): publish 2001-2021 retrain evidence for 2023-2025'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prediction-accuracy-2001-2021-evidence
+          path: |
+            models/monthly_lifecycle/2001_2021/evaluation_results.json
+            models/monthly_lifecycle/2001_2021/prediction_validation.csv
+            models/monthly_lifecycle/2001_2021/rolling_validation_results.json
+          if-no-files-found: error
+          retention-days: 14

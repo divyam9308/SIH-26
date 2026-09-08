@@ -16,13 +16,25 @@ def test_migrated_frontend_has_no_stale_model_simulation_page_contract():
     assert 'path="/prediction-accuracy"' in routes
 
 
-def test_prediction_accuracy_does_not_treat_missing_confidence_as_zero():
+def test_prediction_accuracy_uses_real_2001_2021_evidence():
     page = (ROOT / "frontend" / "src" / "pages" / "PredictionAccuracyPage.tsx").read_text()
     service = (ROOT / "frontend" / "src" / "services" / "predictionAccuracyService.ts").read_text()
-    assert "model_confidence_percentage == null ? 'Unavailable'" in page
-    assert "typeof value === 'number' && Number.isFinite(value)" in page
-    assert "risk_probability: number | null" in service
-    assert "model_confidence_percentage: number | null" in service
+    publisher = (ROOT / "scripts" / "publish_prediction_accuracy_2001_2021.py").read_text()
+
+    assert "const MODEL_WINDOW = '2001_2021'" in page
+    assert 'getPredictionAccuracyData(MODEL_WINDOW' in page
+    assert '2001–2021 training' in page
+    assert 'const EVALUATED =' not in page
+    assert '<tbody />' not in page
+    assert 'ScatterChart' in page
+    assert 'LineChart' in page
+    assert '/api/models/prediction-validation' in service
+    assert '/api/models/rolling-validation' in service
+    assert 'Production validation evidence for ${window} is empty.' in service
+    assert 'TRAIN_START = 2001' in publisher
+    assert 'TRAIN_END = 2021' in publisher
+    assert 'TEST_YEARS = (2023, 2024, 2025)' in publisher
+    assert 'retrain_lifecycle(TRAIN_START, TRAIN_END)' in publisher
 
 
 def test_registry_uses_canonical_evaluation_metadata_and_flags_poisoned_manifest(tmp_path):
