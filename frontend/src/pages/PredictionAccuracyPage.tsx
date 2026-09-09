@@ -100,7 +100,7 @@ export function PredictionAccuracyPage() {
     [BarChart3, 'Holdout period', '2022 – 2025'],
   ];
 
-  return <div className="prediction-accuracy-page"><div className="pa-product-header"><div><b>PAIMANA</b><span>MoSPI · Project Risk Intelligence</span></div><div><em className="production"><i />Production model</em><em>SIH 26103</em></div></div><main className="pa-content">
+  return <div className="prediction-accuracy-page"><main className="pa-content">
     <div className="pa-heading"><div><h1>Prediction Accuracy</h1><p>Official production retrain · 2001–2021 training · 2022–2025 holdout</p></div><span className="verified"><CheckCircle2 />Verified production evidence</span></div>
     {error ? <section className="pa-error"><AlertTriangle /><span>{error}</span><button onClick={refresh}>Retry</button></section> : <>
       <section className={`pa-evidence ${loading ? 'loading' : ''}`} style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>{facts.map(([Icon, label, result], index) => <div key={label}><Icon /><span>{label}</span><b>{result}</b>{index < facts.length - 1 && <i />}</div>)}</section>

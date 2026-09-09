@@ -11,15 +11,15 @@ import { displayRisk, inr, ProjectPanel, RiskChip, riskClass } from './Projects'
 import { shapExplanationSubject, shapFeatureLabel } from '../lib/shapFeatureLabels';
 import '../styles/projects.css';
 import { SAVED_WINDOW_STORAGE_KEY } from '../components/dashboard/FilterBar';
-import { predictionActualRatio } from '../lib/predictionComparison';
+import { predictionActualError } from '../lib/predictionComparison';
 
 const unavailable = 'Not reported';
 const percentage = (value: number | null | undefined) => value == null ? 'Unavailable' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 const days = (value: number | null | undefined) => value == null ? 'Unavailable' : `${value.toFixed(0)} days`;
 const warningDate = (value: string | null) => value ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) : 'Not reported';
 const comparison = (predicted: number | null | undefined, actual: number | null | undefined) => {
-  const ratio = predictionActualRatio(predicted, actual);
-  return ratio === null ? 'Unavailable' : `${ratio.toFixed(1)}%`;
+  const error = predictionActualError(predicted, actual);
+  return error === null ? 'Unavailable' : `${error.toFixed(1)}%`;
 };
 const featureLabel = shapFeatureLabel;
 const isUsableFactors = (factors: ShapFactor[]) => factors.some((factor) => factor.direction !== 'not available' || factor.impact !== 0);
@@ -129,8 +129,8 @@ export function ProjectDetail() {
     {forecastStatus && <div className="partial-data-banner"><AlertTriangle size={16} />{forecastStatus}. Project information remains available.</div>}
 
     <section className="prediction-summary" aria-label="Executive prediction summary">
-      <article className="prediction-card prediction-comparison-card"><p>Cost Overrun</p><div className="prediction-pair"><div><span>Predicted Cost Overrun</span><strong className={tone}>{percentage(forecast?.predicted_cost_overrun_percentage)}</strong></div><div><span>Actual Cost Overrun</span><strong>{percentage(project.cost_escalation_pct)}</strong></div></div><small>Prediction vs Actual: {comparison(forecast?.predicted_cost_overrun_percentage, project.cost_escalation_pct)}</small></article>
-      <article className="prediction-card prediction-comparison-card"><p>Time Overrun</p><div className="prediction-pair"><div><span>Predicted Time Overrun</span><strong className={tone}>{days(forecast?.predicted_delay_days)}</strong></div><div><span>Actual Time Overrun</span><strong>{days(project.schedule_extension_days)}</strong></div></div><small>Prediction vs Actual: {comparison(forecast?.predicted_delay_days, project.schedule_extension_days)}</small></article>
+      <article className="prediction-card prediction-comparison-card"><p>Cost Overrun</p><div className="prediction-pair"><div><span>Predicted Cost Overrun</span><strong className={tone}>{percentage(forecast?.predicted_cost_overrun_percentage)}</strong></div><div><span>Actual Cost Overrun</span><strong>{percentage(project.cost_escalation_pct)}</strong></div></div><small>Error: {comparison(forecast?.predicted_cost_overrun_percentage, project.cost_escalation_pct)}</small></article>
+      <article className="prediction-card prediction-comparison-card"><p>Time Overrun</p><div className="prediction-pair"><div><span>Predicted Time Overrun</span><strong className={tone}>{days(forecast?.predicted_delay_days)}</strong></div><div><span>Actual Time Overrun</span><strong>{days(project.schedule_extension_days)}</strong></div></div><small>Error: {comparison(forecast?.predicted_delay_days, project.schedule_extension_days)}</small></article>
       <article className="prediction-card"><p>Overall Risk</p>{category ? <RiskChip level={category} /> : <strong>Unavailable</strong>}<span>{forecast ? `${hasRiskProbability ? 'Implementation risk score' : 'Calibrated risk severity'} ${forecast.risk_score.toFixed(1)}/100` : unavailable}</span>{hasRiskProbability && <small>Risk probability {forecast.risk_probability_percentage.toFixed(1)}%</small>}</article>
     </section>
 

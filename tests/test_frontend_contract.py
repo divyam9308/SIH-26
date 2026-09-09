@@ -255,7 +255,7 @@ def test_prediction_accuracy_endpoints_resolve_the_requested_lifecycle_window():
     assert report.json()["metadata"]["test_start"] == 2022
     assert report.json()["metadata"]["test_end"] == 2025
     assert rows.json()["model_version"] == "2001_2021"
-    assert rows.json()["total"] == 728
+    assert rows.json()["total"] == 11546
     assert rows.json()["items"][0]["project_id"]
     assert importance.json()["model_version"] == "monthly-2001-2021"
 

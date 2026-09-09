@@ -8,6 +8,7 @@ const pageTitle = (pathname: string) => {
   if (pathname === '/projects') return 'Projects';
   if (pathname === '/early-warnings') return 'Early Warnings';
   if (pathname === '/prediction-accuracy') return 'Prediction Accuracy';
+  if (pathname === '/model-comparison/training-window-performance') return 'Training Window Performance';
   return 'Dashboard';
 };
 
