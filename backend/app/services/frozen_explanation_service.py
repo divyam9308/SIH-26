@@ -11,8 +11,8 @@ import json
 import math
 import os
 import logging
-import fcntl
 import re
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -41,6 +41,45 @@ ARTIFACT_SCHEMA_VERSION = 1
 EXPLANATION_FILENAME = "project_explanations.jsonl"
 EXPLANATION_METADATA_FILENAME = "project_explanations.meta.json"
 EXPLANATION_METHOD = "deterministic_two_path_wrapper_contributions_v1"
+
+
+@contextmanager
+def _exclusive_file_lock(lock):
+    """Serialize explanation cache writes on POSIX and Windows."""
+    if os.name == "nt":
+        import msvcrt
+
+        lock.seek(0, os.SEEK_END)
+        if lock.tell() == 0:
+            lock.write("\0")
+            lock.flush()
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory metadata where the host platform supports it."""
+    if os.name == "nt":
+        return
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 @lru_cache(maxsize=128)
@@ -389,11 +428,7 @@ def _atomic_json(path: Path, value: dict) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory(path.parent)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -448,11 +483,7 @@ def publish_explanations(window: str, entries: list[dict]) -> dict:
         if _identity(window) != identity:
             raise ValueError("Frozen artifacts changed during publication; retry required.")
         os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory(path.parent)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -518,8 +549,7 @@ def build_local_explanation(window: str, code: str, snapshot_date: str | None = 
         return cached
     # Separate lock inode survives atomic cache replacement. Serialize misses
     # per window across API threads/workers and the offline warmer.
-    with _output_path(window).with_suffix('.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _output_path(window).with_suffix('.lock').open('a+') as lock, _exclusive_file_lock(lock):
         identity = _identity(window)
         cached = local_explanation(window, code, snapshot_date, identity)
         if cached and _fully_available(cached):

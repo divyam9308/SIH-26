@@ -1,4 +1,4 @@
-export interface Project { id:string | number; code?:string; name:string; sector:string; riskLevel?:string; riskScore:number; costRisk:number; scheduleRisk:number; progress:number | null; warning:string }
+export interface Project { id:string | number; code?:string; name:string; sector:string; riskLevel?:string; riskScore:number; costRisk:number; scheduleRiskDays:number; progress:number | null }
 export interface DashboardKPI { title:string; value:string; change:string; tone:'blue'|'red'|'orange' }
 export interface RiskDistribution { name:string; value:number; color:string }
 export interface ExpenditureProgressPoint { x:number; y:number; group:'On Track'|'Monitor'|'At Risk' }

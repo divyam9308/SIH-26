@@ -125,11 +125,47 @@ def _saved_payload(window: str) -> dict | None:
                 f"Saved production view for {window} has incomplete embedded explanations at project {incomplete}: {path}"
             )
     result = dict(payload)
-    result["manifest"] = {
+    manifest = dict(result.get("manifest") or {})
+    manifest.update({
         "model_version": result["items"][0].get("model_version") if result["items"] else window,
         "artifact_source": str(path),
-    }
+    })
+    result["manifest"] = manifest
     return result
+
+
+def historical_validation_rows(window: str) -> pd.DataFrame:
+    """Return the published project-level rows derived from a frozen ledger.
+
+    The saved portfolio view contains literal prediction, outcome, and error
+    values from each project's latest official holdout snapshot.  It is used
+    only when the much larger snapshot-level validation CSV is not distributed
+    with the checkout; headline metrics continue to come from the canonical
+    evaluation report.
+    """
+    payload = portfolio_payload(window)
+    manifest = payload.get("manifest") or {}
+    items = payload.get("items") or []
+    frame = pd.DataFrame.from_records([
+        {
+            "project_id": item.get("project_code"),
+            "project_name": item.get("project_name"),
+            "sector": item.get("sector"),
+            "implementing_agency": item.get("implementing_agency"),
+            "snapshot_date": item.get("snapshot_date"),
+            "predicted_cost_overrun": item.get("predicted_cost_overrun_percentage"),
+            "actual_cost_overrun": item.get("actual_cost_overrun_percentage"),
+            "cost_error": item.get("cost_error_percentage"),
+            "predicted_delay_days": item.get("predicted_delay_days"),
+            "actual_delay_days": item.get("actual_delay_days"),
+            "delay_error": item.get("delay_error_days"),
+            "model_confidence_percentage": item.get("model_confidence_percentage"),
+        }
+        for item in items
+    ])
+    frame.attrs["testing_period"] = manifest.get("testing_period") or []
+    frame.attrs["evidence_scope"] = "latest_project_snapshot_from_frozen_validation_ledger"
+    return frame
 
 
 def _manifest(window: str) -> dict:

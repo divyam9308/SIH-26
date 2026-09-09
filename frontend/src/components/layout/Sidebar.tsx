@@ -1,5 +1,23 @@
-import { LayoutDashboard,FolderKanban,ChartNoAxesCombined,TriangleAlert,BarChart3,FileText,DatabaseZap,Settings,RefreshCw,Target } from 'lucide-react'; import { NavLink } from 'react-router-dom'; import { Button } from '../ui/Button';
-const nav=[['/dashboard','Dashboard',LayoutDashboard],['/projects','Projects',FolderKanban],['/forecast','Forecast',ChartNoAxesCombined],['/early-warnings','Early Warnings',TriangleAlert],['/analytics','Analytics',BarChart3],['/reports','Reports',FileText],['/prediction-accuracy','Prediction Accuracy',Target],['/model-comparison/training-window-performance','Training Window Performance',BarChart3],['/data-quality','Data Quality',DatabaseZap],['/settings','Settings',Settings]] as const;
-export function Sidebar(){return <aside className="flex min-h-screen w-16 shrink-0 flex-col bg-[#102a43] text-slate-300 md:w-60"><div className="border-b border-white/10 px-3 py-6 md:px-6"><div className="text-center text-lg font-bold text-white md:text-left md:text-xl"><span className="hidden md:inline">InfraSight </span><span className="text-blue-400">AI</span></div><p className="mt-1 hidden text-[10px] tracking-widest text-slate-400 md:block">INFRASTRUCTURE INTELLIGENCE</p></div><nav aria-label="Primary navigation" className="flex-1 px-2 py-5 md:px-3">{nav.map(([path,label,Icon])=><NavLink key={path} to={path} aria-label={label} className={({isActive})=>`mb-1 flex items-center justify-center gap-3 rounded-md px-3 py-2.5 text-sm md:justify-start ${isActive?'bg-blue-600 text-white shadow-sm':'hover:bg-white/10'}`}><Icon size={17}/><span className="hidden md:inline">{label}</span></NavLink>)}</nav></aside>}
-export function Header({onRefresh,datasetSnapshot,available}:{onRefresh:()=>void;datasetSnapshot:string | null;available:boolean}){return <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3"><div className="text-xs text-slate-500"><span className="font-semibold text-slate-700">Data Snapshot:</span> {datasetSnapshot ?? 'Unavailable'} <span className="mx-3 text-slate-300">|</span><span className="font-semibold text-slate-700">Data Source:</span> official PAIMANA public-project subset</div><div className="flex items-center gap-3"><span className={`flex items-center gap-1.5 text-xs font-semibold ${available?'text-emerald-600':'text-red-600'}`}><span className={`h-2 w-2 rounded-full ${available?'bg-emerald-500':'bg-red-500'}`}/>{available?'Live':'Unavailable'}</span><Button onClick={onRefresh} className="py-1.5"><RefreshCw size={14}/>Refresh</Button></div></header>}
-export function SystemStatus(){return null}
+import { BarChart3, FolderKanban, LayoutDashboard, Target, TriangleAlert, X } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
+
+const nav = [
+  ['/dashboard', 'Dashboard', LayoutDashboard],
+  ['/projects', 'Projects', FolderKanban],
+  ['/early-warnings', 'Early Warnings', TriangleAlert],
+  ['/prediction-accuracy', 'Prediction Accuracy', Target],
+  ['/model-comparison/training-window-performance', 'Training Window Performance', BarChart3],
+] as const;
+
+export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return <>
+    <button type="button" aria-label="Close navigation" tabIndex={open ? 0 : -1} onClick={onClose} className={`fixed inset-0 z-40 bg-slate-950/40 transition-opacity ${open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} />
+    <aside aria-label="Application navigation" aria-hidden={!open} className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,86vw)] flex-col bg-[#102a43] text-slate-300 shadow-2xl transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="flex items-start justify-between border-b border-white/10 px-6 py-6">
+        <div><div className="text-xl font-bold text-white">InfraSight <span className="text-blue-400">AI</span></div><p className="mt-1 text-[10px] tracking-widest text-slate-400">INFRASTRUCTURE INTELLIGENCE</p></div>
+        <button type="button" aria-label="Close sidebar" onClick={onClose} className="grid size-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"><X size={20} /></button>
+      </div>
+      <nav aria-label="Primary navigation" className="flex-1 px-3 py-5">{nav.map(([path, label, Icon]) => <NavLink key={path} to={path} onClick={onClose} className={({ isActive }) => `mb-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-sm ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-white/10'}`}><Icon size={17} />{label}</NavLink>)}</nav>
+    </aside>
+  </>;
+}
